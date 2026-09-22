@@ -178,7 +178,7 @@ See [`.env.example`](.env.example). The important knobs:
 | `DATA_DIR` | `./data` | browser profile, API key, sessions, cache, probe reports |
 | `API_KEY` | generated | client key; generated into `DATA_DIR/api-key.txt` when empty |
 | `HEADLESS` | `true` | set `false` to watch the browser |
-| `BROWSER_CHANNEL` | Playwright Chromium | `chrome` or `msedge` to use an installed browser |
+| `BROWSER_CHANNEL` | Playwright Chromium | `chrome` or `msedge` to use an installed browser (needed if a Windows Application Control / AppLocker policy blocks Playwright's downloaded Chromium: `launchPersistentContext: spawn UNKNOWN` / "An Application Control policy has blocked this file") |
 | `MAX_CONCURRENT_TURNS` | `2` | browser tabs, and therefore parallel requests |
 | `WARM_THREADS` | `1` | idle side chats to keep ready; `0` disables; set `MAX_CONCURRENT_TURNS` one higher than desired client concurrency when enabled |
 | `QUEUE_TIMEOUT_SEC` | `30` | wait for a free tab before answering `503` |
