@@ -32,7 +32,8 @@ export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoi
     "Each block must contain exactly one object:",
     '{"name": "...", "arguments": {...}}',
     "The program then runs the function and sends you its result in the next message, and you continue from there.",
-    "Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed.",
+    "Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed, but it is never a substitute for them.",
+    "Every reply is either a final answer to the end user in plain text with no block, or one or more function-call blocks. If you state that you will check, look up, read, run or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block.",
     "Inside this program, do not look anything up, browse, search, read files or act on your own, even if you could: the end user needs the answer to come from these functions, so requesting a function is the only correct way to get information or act. Do not run or simulate anything yourself.",
     "When no function is needed, reply to the end user as plain text with no such block.",
   );
