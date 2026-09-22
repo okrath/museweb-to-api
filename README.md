@@ -43,6 +43,45 @@ curl -s http://127.0.0.1:8090/v1/chat/completions \
   -d '{"model":"muse","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
 
+## Using it with client SDKs
+
+Point any OpenAI- or Anthropic-compatible client at the gateway with the key from
+`data/api-key.txt` (or your own `API_KEY`).
+
+**OpenAI Python SDK**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8090/v1", api_key=open("data/api-key.txt").read().strip())
+resp = client.chat.completions.create(model="muse", messages=[{"role": "user", "content": "Hello"}])
+print(resp.choices[0].message.content)
+```
+
+**OpenAI Node SDK**
+
+```js
+import OpenAI from "openai";
+
+const client = new OpenAI({ baseURL: "http://127.0.0.1:8090/v1", apiKey: "<key from data/api-key.txt>" });
+const resp = await client.chat.completions.create({ model: "muse", messages: [{ role: "user", content: "Hello" }] });
+console.log(resp.choices[0].message.content);
+```
+
+**Anthropic Python SDK**
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(base_url="http://127.0.0.1:8090", api_key=open("data/api-key.txt").read().strip())
+resp = client.messages.create(model="muse", max_tokens=1024, messages=[{"role": "user", "content": "Hello"}])
+print(resp.content[0].text)
+```
+
+Editor tools such as Cursor or Continue: set their OpenAI-compatible base URL to
+`http://127.0.0.1:8090/v1` and the API key to the same value; pick any `muse*` model id from
+the table below.
+
 ## Models
 
 | Model id | Muse mode |
@@ -113,6 +152,11 @@ continues that Muse conversation and types only the newest message. The match br
 client edits earlier messages, changes the system prompt, or switches mode; the request then
 starts a fresh chat with the whole transcript rendered into one prompt. If a stored Muse chat
 can no longer be opened, the gateway retries once as a fresh chat before reporting an error.
+
+Nothing in the gateway deletes old side chats automatically, so a busy setup accumulates one
+per API conversation over time. If the panel gets crowded, open Muse, hover a side-chat row,
+click its "..." (More thread actions) button and choose Delete; deleting one a client still has
+cached simply falls back to a fresh chat on its next use.
 
 Multi-turn clients should send `x-conversation-id` so two users with identical histories do
 not share a Muse chat. Sessions expire after `SESSION_TTL_SEC` (default one day; `0` disables
