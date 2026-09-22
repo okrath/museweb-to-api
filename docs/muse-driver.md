@@ -61,6 +61,26 @@ New conversation (`/thread/new`):
 Follow-up (`/thread/<uuid>` from the session store): navigate if the tab is elsewhere, type,
 send, read.
 
+## Keeping the function-call protocol alive on resumed turns
+
+`renderTranscript` (`src/prompt/render-transcript.ts`) types the whole message list only on a
+fresh Muse conversation; a resumed turn types just the delta (the newest message, or the latest
+function results) because Muse already has the earlier turns in its own visible chat history.
+That saving also drops the function-calling instructions stated once by `renderToolProtocol` at
+the start of the chat — nothing restated them on later turns. Over a long conversation that first
+statement scrolls out of weight, and a plain follow-up question (no `tool`-role message left in
+the sent history, e.g. because the client pruned an old function round out of context) reached
+Muse as bare text. Muse then drifted back to its own persona instead of requesting a function —
+in one observed case, offering to connect a device to read a file directly rather than calling
+`read_file`. `renderToolReminder` (`src/prompt/tool-protocol.ts`) is a short restatement of the
+two rules that matter (decide the next function, reply with a fenced json block; never look
+anything up or act on your own). `route-request.ts#promptForRequest` passes `toolsActive` whenever
+a resumed turn still has `req.tools` (and `toolChoice !== "none"`), and `renderResumedTranscript`
+prepends the reminder to every return path except the one that already appends its own
+`Continue: ...` line after a function result. Confirmed live 2026-09-22: the same resumed,
+tool-message-free follow-up got a plain-prose reply before this and a correct `tool_calls` reply
+after.
+
 ## How the reply is read
 
 1. Before sending, every element under `conversationRoot` is tagged `data-mta-seen`.
@@ -116,6 +136,7 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | `504 Muse did not create a side chat … in time` while the reply is visible in the Muse UI | the panel changed in a way the driver did not recognise; compare the `threadRow` texts in `trace` before and after, and check `threadPanel`/`threadRow` selectors |
 | Side chats keep growing past `MAX_SIDE_THREADS`, or a `"Side-chat cleanup skipped"` warning appears | `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`/`threadDeleteConfirmPattern`; cleanup is best-effort and only logs a warning, it never fails the turn |
 | Timeout with `Delivery not confirmed` and many short-lived sockets | Muse's VM rejected the message; see the note below |
+| Muse answers in prose, or offers to connect a device / access files directly, on a later turn of a tool-using conversation | the resumed-turn reminder is missing or too weak; see "Keeping the function-call protocol alive on resumed turns" and `renderToolReminder` in `src/prompt/tool-protocol.ts` |
 
 ## Known Muse-side failure: oversized main chat
 
