@@ -22,6 +22,13 @@ function normalizeMessages(messages: ChatMessage[]): Array<Record<string, unknow
       : {}),
     ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
     ...(message.isError === undefined ? {} : { isError: message.isError }),
+    // A digest, not the raw bytes, keeps sessions.json small while still distinguishing histories
+    // that share the same text but attached different files.
+    ...(message.attachments && message.attachments.length > 0
+      ? {
+          attachments: message.attachments.map((a) => `${a.filename}:${a.mediaType}:${createHash("sha256").update(a.data).digest("hex")}`),
+        }
+      : {}),
   }));
 }
 

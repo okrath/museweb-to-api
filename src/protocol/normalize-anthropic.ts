@@ -1,11 +1,19 @@
 import { z } from "zod";
-import type { ChatMessage, ChatRequest, Effort, ToolChoice, ToolDefinition } from "../core/types.js";
+import type { Attachment, ChatMessage, ChatRequest, Effort, ToolChoice, ToolDefinition } from "../core/types.js";
+import { attachmentFromBase64 } from "./attachments.js";
 import { ProtocolError } from "./errors.js";
 import type { NormalizeInput } from "./normalize-openai.js";
 
 const toolNamePattern = /^[a-zA-Z0-9_-]{1,64}$/;
 const textPartSchema = z.object({ type: z.literal("text"), text: z.string() });
 const blockSchema = z.object({ type: z.string() }).passthrough();
+const attachmentSourceSchema = z.object({ type: z.string() }).passthrough();
+/** `image`/`document` are Anthropic's own block types; `file` is a local extension for anything else (video, ...). */
+const attachmentBlockSchema = z.object({
+  type: z.enum(["image", "document", "file"]),
+  source: attachmentSourceSchema,
+  filename: z.string().optional(),
+});
 const toolDefinitionSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
@@ -98,11 +106,13 @@ function normalizeToolChoice(raw: z.infer<typeof bodySchema>["tool_choice"]): To
 function normalizeMessages(raw: z.infer<typeof bodySchema>["messages"]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const seenToolCallIds = new Set<string>();
+  const lastIndex = raw.length - 1;
 
-  for (const msg of raw) {
+  raw.forEach((msg, index) => {
+    const allowAttachments = index === lastIndex && msg.role === "user";
     if (typeof msg.content === "string") {
       messages.push({ role: msg.role, content: msg.content });
-      continue;
+      return;
     }
 
     if (msg.role === "assistant") {
@@ -125,21 +135,36 @@ function normalizeMessages(raw: z.infer<typeof bodySchema>["messages"]): ChatMes
       const normalized: ChatMessage = { role: "assistant", content: text.join("") };
       if (toolCalls.length > 0) normalized.toolCalls = toolCalls;
       messages.push(normalized);
-      continue;
+      return;
     }
 
     let text: string[] = [];
+    let attachments: Attachment[] = [];
     let emittedMessage = false;
     const flushText = () => {
-      if (text.length === 0) return;
-      messages.push({ role: "user", content: text.join("") });
+      if (text.length === 0 && attachments.length === 0) return;
+      const normalized: ChatMessage = { role: "user", content: text.join("") };
+      if (attachments.length > 0) normalized.attachments = attachments;
+      messages.push(normalized);
       text = [];
+      attachments = [];
       emittedMessage = true;
     };
 
     for (const block of msg.content) {
       if (block.type === "text") {
         text.push(textBlocks([block]));
+        continue;
+      }
+      if (block.type === "image" || block.type === "document" || block.type === "file") {
+        if (!allowAttachments) invalid("attachments are only supported on the newest message");
+        const parsed = attachmentBlockSchema.safeParse(block);
+        if (!parsed.success) invalid(`invalid ${block.type} block`);
+        const source = parsed.data.source as { type: string; media_type?: unknown; data?: unknown };
+        if (source.type !== "base64" || typeof source.media_type !== "string" || typeof source.data !== "string") {
+          invalid("only base64 attachment sources are supported (remote URLs are not supported)");
+        }
+        attachments.push(attachmentFromBase64(source.media_type, source.data, parsed.data.filename, invalid));
         continue;
       }
       if (block.type !== "tool_result") invalid("only text content is supported");
@@ -159,7 +184,7 @@ function normalizeMessages(raw: z.infer<typeof bodySchema>["messages"]): ChatMes
     }
     flushText();
     if (!emittedMessage) messages.push({ role: "user", content: "" });
-  }
+  });
 
   return messages;
 }

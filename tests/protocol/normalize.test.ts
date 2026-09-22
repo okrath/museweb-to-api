@@ -124,6 +124,66 @@ describe("normalizeOpenAi", () => {
     expect(req.tools).toBeUndefined();
     expect(req.toolChoice).toBe("none");
   });
+
+  it("accepts image_url and file attachments on the newest message", () => {
+    const req = normalizeOpenAi({
+      ...base,
+      body: {
+        model: "muse",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "look at these" },
+              { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } },
+              { type: "file", file: { filename: "clip.mp4", file_data: "data:video/mp4;base64,d29ybGQ=" } },
+            ],
+          },
+        ],
+      },
+    });
+    expect(req.messages).toEqual([
+      {
+        role: "user",
+        content: "look at these",
+        attachments: [
+          { filename: "attachment.png", mediaType: "image/png", data: "aGVsbG8=" },
+          { filename: "clip.mp4", mediaType: "video/mp4", data: "d29ybGQ=" },
+        ],
+      },
+    ]);
+  });
+
+  it("rejects attachments on any message but the newest, and remote image URLs", () => {
+    expect(() =>
+      normalizeOpenAi({
+        ...base,
+        body: {
+          model: "muse",
+          messages: [
+            { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } }] },
+            { role: "assistant", content: "ok" },
+            { role: "user", content: "thanks" },
+          ],
+        },
+      }),
+    ).toThrowError(/newest message/);
+    expect(() =>
+      normalizeOpenAi({
+        ...base,
+        body: {
+          model: "muse",
+          messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.com/cat.png" } }] }],
+        },
+      }),
+    ).toThrowError(/data: URL/);
+    expect(() =>
+      normalizeOpenAi({
+        ...base,
+        body: { model: "muse", messages: [{ role: "user", content: [{ type: "input_audio", input_audio: {} }] }] },
+      }),
+    ).toThrowError(/only text, image_url and file/);
+  });
 });
 
 describe("normalizeAnthropic", () => {
@@ -204,5 +264,61 @@ describe("normalizeAnthropic", () => {
         body: { model: "muse", messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "missing", content: "x" }] }] },
       }),
     ).toThrowError(/unknown tool call id/);
+  });
+
+  it("accepts image, document and file attachments on the newest message", () => {
+    const req = normalizeAnthropic({
+      ...base,
+      body: {
+        model: "muse",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "look at these" },
+              { type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } },
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: "d29ybGQ=" } },
+              { type: "file", source: { type: "base64", media_type: "video/mp4", data: "Y2xpcA==" }, filename: "clip.mp4" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(req.messages).toEqual([
+      {
+        role: "user",
+        content: "look at these",
+        attachments: [
+          { filename: "attachment.png", mediaType: "image/png", data: "aGVsbG8=" },
+          { filename: "attachment.pdf", mediaType: "application/pdf", data: "d29ybGQ=" },
+          { filename: "clip.mp4", mediaType: "video/mp4", data: "Y2xpcA==" },
+        ],
+      },
+    ]);
+  });
+
+  it("rejects attachments on any message but the newest, and non-base64 sources", () => {
+    expect(() =>
+      normalizeAnthropic({
+        ...base,
+        body: {
+          model: "muse",
+          messages: [
+            { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } }] },
+            { role: "assistant", content: "ok" },
+            { role: "user", content: "thanks" },
+          ],
+        },
+      }),
+    ).toThrowError(/newest message/);
+    expect(() =>
+      normalizeAnthropic({
+        ...base,
+        body: {
+          model: "muse",
+          messages: [{ role: "user", content: [{ type: "image", source: { type: "url", url: "https://example.com/cat.png" } }] }],
+        },
+      }),
+    ).toThrowError(/base64/);
   });
 });

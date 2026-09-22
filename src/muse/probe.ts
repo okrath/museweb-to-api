@@ -1,9 +1,9 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, extname, resolve } from "node:path";
 import type { Logger } from "pino";
 import type { Page, Request, WebSocket } from "playwright";
 import type { GatewayConfig } from "../config.js";
-import type { TurnEvent } from "../core/types.js";
+import type { Attachment, TurnEvent } from "../core/types.js";
 import { MuseBrowser } from "./browser.js";
 import { createMuseDriver, waitForComposer, type TurnTraceEntry } from "./page-driver.js";
 import { isSignedInUrl, selectors } from "./selectors.js";
@@ -11,7 +11,31 @@ import { isSignedInUrl, selectors } from "./selectors.js";
 export interface ProbeOptions {
   /** Prompt to send through the real turn pipeline; omit to only inventory the DOM. */
   send?: string;
+  /** Local file paths to attach to that turn, for calibrating fileInput/attachmentPreview. */
+  attach?: string[];
   headed: boolean;
+}
+
+const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+};
+
+function loadAttachments(paths: string[] | undefined): Attachment[] | undefined {
+  if (!paths || paths.length === 0) return undefined;
+  return paths.map((path) => ({
+    filename: basename(path),
+    mediaType: MEDIA_TYPE_BY_EXTENSION[extname(path).toLowerCase()] ?? "application/octet-stream",
+    data: readFileSync(path).toString("base64"),
+  }));
 }
 
 interface NetworkEntry {
@@ -116,7 +140,13 @@ export async function runProbe(config: GatewayConfig, log: Logger, options: Prob
       let lastShotAt = 0;
       await driver.runTracedTurn(
         page,
-        { requestId: "probe", prompt: options.send, mode: "default", signal: controller.signal },
+        {
+          requestId: "probe",
+          prompt: options.send,
+          mode: "default",
+          attachments: loadAttachments(options.attach),
+          signal: controller.signal,
+        },
         (event) => events.push(event),
         (entry) => {
           const previous = trace[trace.length - 1];
@@ -153,7 +183,7 @@ export async function runProbe(config: GatewayConfig, log: Logger, options: Prob
           signedIn,
           selectors,
           dom: report,
-          turn: options.send ? { prompt: options.send, events, trace } : undefined,
+          turn: options.send ? { prompt: options.send, attach: options.attach, events, trace } : undefined,
           network,
           sockets,
           consoleErrors,

@@ -33,6 +33,15 @@ selector keep the driver limping (and the probe report useful) when Muse renames
 - **Mode picker**: none was found on the web UI (`modeLike: 0` in every probe). Models other
   than `muse` therefore fail with an explicit error until `modeMenuButton`/`modeOption` match
   something real.
+- **Attachments**: confirmed live 2026-09-22 with `pnpm muse:probe --attach`. The visible control
+  is `button[aria-label="Attach file"]`, but the driver never clicks it: it hands files straight
+  to the page's `input[type="file"]` (`fileInput`) via Playwright's `setInputFiles`, which works
+  even though that input is hidden. A successful upload renders a thumbnail with a remove button
+  in the composer, matched by `attachmentPreview`'s generic guesses. If no preview appears within
+  20 s the driver logs a warning and sends anyway, so an unconfirmed upload is not by itself a
+  hard failure; a genuinely missing `fileInput` is (see the table below). Live check: a 1×1 PNG
+  attached this way was correctly described by Muse's reply ("một ảnh PNG chỉ có 1×1 pixel màu
+  đen").
 - **Account usage**: the left-nav dock's "..." button (`dockMoreButton`) opens a menu with a
   "Settings" item (`settingsMenuItemPattern`); its default General tab shows two usage meters as
   `role="progressbar"` elements (`usageProgressbar`) with `aria-valuenow` plus `[data-slot="text"]`
@@ -132,6 +141,8 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | Reply contains "Copy" / toolbar text | add the control's selector to `strip` |
 | Wrong node picked as the reply | compare `candidateSummaries`; tighten `assistantMessage` |
 | `mode "thinking" could not be selected` | `modeMenuButton` / `modeOption` / `modeLabels`; the web UI may simply not expose a picker |
+| `Muse file input not found` when sending an attachment | `fileInput` in `selectors.ts`; check `dom.buttons`/a fresh `pnpm muse:probe` dump for the real attach control |
+| Attachment sent but Muse never appears to receive the file, with no error | `attachmentPreview` did not match anything real, so the driver only logged a warning and sent early; tighten it from a probe run taken right after attaching |
 | Follow-ups never reuse the chat (`x-mta-session-reused: 0`) | the URL stayed on `/thread/new` after the reply; check `turn.trace[*].snapshot.url` and `conversationIdFromUrl` |
 | `504 Muse did not create a side chat … in time` while the reply is visible in the Muse UI | the panel changed in a way the driver did not recognise; compare the `threadRow` texts in `trace` before and after, and check `threadPanel`/`threadRow` selectors |
 | Side chats keep growing past `MAX_SIDE_THREADS`, or a `"Side-chat cleanup skipped"` warning appears | `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`/`threadDeleteConfirmPattern`; cleanup is best-effort and only logs a warning, it never fails the turn |

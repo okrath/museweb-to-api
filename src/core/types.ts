@@ -14,12 +14,22 @@ export interface ToolDefinition {
 
 export type ToolChoice = "auto" | "none" | "required" | { name: string };
 
+/** A file attached to a chat turn (image, video, document, ...); always inline, never a remote URL. */
+export interface Attachment {
+  filename: string;
+  mediaType: string;
+  /** Base64-encoded bytes. */
+  data: string;
+}
+
 export interface ChatMessage {
   role: Role;
   content: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
   isError?: boolean;
+  /** Only ever set on the newest message of a request; see `protocol/attachments.ts`. */
+  attachments?: Attachment[];
 }
 
 export type Effort = "none" | "low" | "medium" | "high" | "xhigh";
@@ -60,6 +70,8 @@ export interface TurnInput {
   mode: MuseMode;
   /** Existing Muse conversation to continue; undefined starts a new chat. */
   conversationId?: string;
+  /** Files to attach to the composer before typing the prompt. */
+  attachments?: Attachment[];
   signal: AbortSignal;
 }
 

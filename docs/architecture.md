@@ -24,7 +24,10 @@ Fastify gateway (src/server.ts)
    body with zod and produce one `ChatRequest` (`core/types.ts`): text messages with an
    optional leading system message, normalized function definitions and call/result messages,
    the model id, an effort hint, and a conversation hint from `x-conversation-id` / `user` /
-   `metadata.user_id`. Images and `response_format` are rejected with explicit 400s.
+   `metadata.user_id`. `response_format` is rejected with an explicit 400. Inline base64
+   attachments (OpenAI `image_url`/`file`, Anthropic `image`/`document`/`file`) on the newest
+   message become `ChatMessage.attachments` via `protocol/attachments.ts`; an attachment
+   anywhere else, or a remote URL instead of base64, is also a 400 (see README "Attachments").
 2. **Resolve the model.** `protocol/models.ts` maps the model id (plus effort for `muse`) to a
    Muse composer mode.
 3. **Cache.** `cache/response-cache.ts` keys on model, mode, `max_tokens`, the function
@@ -68,19 +71,22 @@ conversation URL, avoiding a navigation.
    new conversation, and wait for the composer. Landing on `auth.muse.ai` or `facebook.com`, or on
    Muse's signed-out landing page, means the profile is signed out → `auth` error.
 2. Select the mode unless the model is `muse`.
-3. Tag every element under the transcript root with `data-mta-seen`.
-4. Fill the composer (`fill`, falling back to `insertText`) and verify the page kept the whole
+3. If the turn carries attachments, write each to a temp file and `setInputFiles` on the
+   composer's file input, then wait for an upload preview before continuing (see
+   "Attachments" in `docs/muse-driver.md`).
+4. Tag every element under the transcript root with `data-mta-seen`.
+5. Fill the composer (`fill`, falling back to `insertText`) and verify the page kept the whole
    prompt.
-5. Click the send button (or press Enter) and wait for the composer to clear, a stop button, or a
+6. Click the send button (or press Enter) and wait for the composer to clear, a stop button, or a
    new reply node. For a new conversation the draft page never shows the reply: the driver waits
    for the new side chat to appear in the panel, opens it (reloading if Muse shows "Something went
    wrong") and reads the reply there. See `docs/muse-driver.md`.
-6. Poll the page every 250 ms. The snapshot script takes the assistant items that follow the
+7. Poll the page every 250 ms. The snapshot script takes the assistant items that follow the
    posted user message and returns the last rendered one as the reply.
    `turn-reader.ts` decides when the reply is complete (stop button gone and text quiet) and
    `DeltaStreamer` turns successive Markdown renderings into append-only deltas, committing
    only finished paragraphs so partially rendered formatting never reaches the client.
-7. Flush the final Markdown, emit the conversation URL, and finish.
+8. Flush the final Markdown, emit the conversation URL, and finish.
 
 All timeouts come from config: first token 120 s, `STALL_TIMEOUT_SEC` while generating,
 `REQUEST_TIMEOUT_SEC` overall.

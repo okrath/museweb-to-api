@@ -57,6 +57,28 @@ describe("gateway", () => {
     expect(gateway.sessions.size).toBe(1);
   });
 
+  it("forwards an image attachment on the newest message to the driver", async () => {
+    const res = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: {
+        model: "muse",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What is this?" },
+              { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } },
+            ],
+          },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(gateway.driver.calls[0]?.attachments).toEqual([{ filename: "attachment.png", mediaType: "image/png", data: "aGVsbG8=" }]);
+  });
+
   it("streams OpenAI chunks ending with [DONE]", async () => {
     const res = await gateway.app.inject({
       method: "POST",

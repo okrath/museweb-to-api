@@ -81,16 +81,19 @@ async function serve(config: GatewayConfig): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
-function parseProbeArgs(args: string[]): { send?: string; headed: boolean } {
+function parseProbeArgs(args: string[]): { send?: string; attach?: string[]; headed: boolean } {
   let send: string | undefined;
+  let attach: string[] | undefined;
   let headed = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--send") send = args[++i];
     else if (arg.startsWith("--send=")) send = arg.slice("--send=".length);
+    else if (arg === "--attach") (attach ??= []).push(args[++i]!);
+    else if (arg.startsWith("--attach=")) (attach ??= []).push(arg.slice("--attach=".length));
     else if (arg === "--headed") headed = true;
   }
-  return { send, headed };
+  return { send, attach, headed };
 }
 
 function usage(): void {
@@ -98,8 +101,9 @@ function usage(): void {
 
   serve            start the OpenAI/Anthropic-compatible gateway (default)
   login            open a browser window to sign in to Muse once
-  probe [--send "text"] [--headed]
-                   dump the live muse.ai DOM (and one traced turn) to DATA_DIR for selector calibration
+  probe [--send "text"] [--attach path] [--headed]
+                   dump the live muse.ai DOM (and one traced turn) to DATA_DIR for selector
+                   calibration; repeat --attach to send more than one file with --send
 `);
 }
 

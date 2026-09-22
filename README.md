@@ -125,8 +125,47 @@ Response headers on every chat request: `x-mta-request-id`, `x-mta-model`, `x-mt
 `x-mta-cache-hit`, `x-mta-warm-thread` (`1` when a pre-created side chat was used), and
 `x-mta-conversation-id` when a resumed or cached Muse chat URL is known up front.
 
-Not supported: images and other non-text content, `response_format`, token usage (reported as
-zero where the wire format requires it).
+Not supported: `response_format`, token usage (reported as zero where the wire format requires
+it).
+
+## Attachments
+
+Images, video and other files can be attached to the newest message of a request; the gateway
+writes them to the real Muse composer before sending, the same as dragging a file in on
+muse.ai. Only inline base64 is accepted (no remote URLs), and only on the last message — Muse
+has no way to retroactively attach a file to an earlier turn.
+
+**OpenAI dialect**
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "What is this?" },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } },
+    { "type": "file", "file": { "filename": "clip.mp4", "file_data": "data:video/mp4;base64,..." } }
+  ]
+}
+```
+
+**Anthropic dialect**
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "What is this?" },
+    { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "..." } },
+    { "type": "file", "source": { "type": "base64", "media_type": "video/mp4", "data": "..." }, "filename": "clip.mp4" }
+  ]
+}
+```
+
+`image` and `document` (PDF) are Anthropic's own block types; `file` is a gateway-specific
+extension for anything else (video, and any other file Muse's own upload UI accepts), mirrored
+on the OpenAI side since neither vendor defines a video content type. See
+[docs/muse-driver.md](docs/muse-driver.md) for the DOM selectors involved and their calibration
+status.
 
 ## Tool calling
 

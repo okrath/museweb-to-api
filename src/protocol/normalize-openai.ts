@@ -1,9 +1,15 @@
 import { z } from "zod";
-import type { ChatMessage, ChatRequest, Effort, ToolChoice, ToolDefinition } from "../core/types.js";
+import type { Attachment, ChatMessage, ChatRequest, Effort, ToolChoice, ToolDefinition } from "../core/types.js";
+import { attachmentFromDataUrl } from "./attachments.js";
 import { ProtocolError } from "./errors.js";
 
 const toolNamePattern = /^[a-zA-Z0-9_-]{1,64}$/;
 const textPartSchema = z.object({ type: z.literal("text"), text: z.string() });
+const imageUrlPartSchema = z.object({ type: z.literal("image_url"), image_url: z.object({ url: z.string() }) });
+const filePartSchema = z.object({
+  type: z.literal("file"),
+  file: z.object({ filename: z.string().optional(), file_data: z.string() }),
+});
 const contentPartSchema = z.object({ type: z.string() }).passthrough();
 const toolDefinitionSchema = z.object({
   type: z.literal("function"),
@@ -66,16 +72,41 @@ function validateToolName(name: string): string {
   return name;
 }
 
-function textContent(content: RawContent): string {
-  if (content == null) return "";
-  if (typeof content === "string") return content;
-  return content
-    .map((part) => {
+interface ContentResult {
+  text: string;
+  attachments: Attachment[];
+}
+
+/** `allowAttachments` is only true for the newest message of the request; see `route-request.ts`. */
+function parseContent(content: RawContent, allowAttachments: boolean): ContentResult {
+  if (content == null) return { text: "", attachments: [] };
+  if (typeof content === "string") return { text: content, attachments: [] };
+
+  let text = "";
+  const attachments: Attachment[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
       const parsed = textPartSchema.safeParse(part);
-      if (!parsed.success) invalid("only text content is supported");
-      return parsed.data.text;
-    })
-    .join("");
+      if (!parsed.success) invalid("invalid text content part");
+      text += parsed.data.text;
+      continue;
+    }
+    if (part.type === "image_url" || part.type === "file") {
+      if (!allowAttachments) invalid("attachments are only supported on the newest message");
+      if (part.type === "image_url") {
+        const parsed = imageUrlPartSchema.safeParse(part);
+        if (!parsed.success) invalid("invalid image_url content part");
+        attachments.push(attachmentFromDataUrl(parsed.data.image_url.url, undefined, invalid));
+      } else {
+        const parsed = filePartSchema.safeParse(part);
+        if (!parsed.success) invalid("invalid file content part");
+        attachments.push(attachmentFromDataUrl(parsed.data.file.file_data, parsed.data.file.filename, invalid));
+      }
+      continue;
+    }
+    invalid("only text, image_url and file content is supported");
+  }
+  return { text, attachments };
 }
 
 function validateArguments(name: string, argumentsJson: string): string {
@@ -110,11 +141,13 @@ function normalizeMessages(raw: z.infer<typeof bodySchema>["messages"]): ChatMes
   const systemParts: string[] = [];
   const rest: ChatMessage[] = [];
   const seenToolCallIds = new Set<string>();
+  const lastIndex = raw.length - 1;
 
-  for (const msg of raw) {
+  raw.forEach((msg, index) => {
+    const allowAttachments = index === lastIndex && msg.role === "user";
     if (msg.role === "system" || msg.role === "developer") {
-      systemParts.push(textContent(msg.content));
-      continue;
+      systemParts.push(parseContent(msg.content, false).text);
+      return;
     }
     if (msg.role === "assistant") {
       const toolCalls = msg.tool_calls?.map((call) => {
@@ -124,21 +157,24 @@ function normalizeMessages(raw: z.infer<typeof bodySchema>["messages"]): ChatMes
         seenToolCallIds.add(call.id);
         return { id: call.id, name, argumentsJson };
       });
-      const normalized: ChatMessage = { role: "assistant", content: textContent(msg.content ?? null) };
+      const normalized: ChatMessage = { role: "assistant", content: parseContent(msg.content ?? null, false).text };
       if (toolCalls && toolCalls.length > 0) normalized.toolCalls = toolCalls;
       rest.push(normalized);
-      continue;
+      return;
     }
     if (msg.role === "user") {
-      rest.push({ role: "user", content: textContent(msg.content) });
-      continue;
+      const { text, attachments } = parseContent(msg.content, allowAttachments);
+      const normalized: ChatMessage = { role: "user", content: text };
+      if (attachments.length > 0) normalized.attachments = attachments;
+      rest.push(normalized);
+      return;
     }
     if (msg.role !== "tool") invalid("unsupported message role");
     if (!seenToolCallIds.has(msg.tool_call_id)) {
       invalid(`tool message references unknown tool call id "${msg.tool_call_id}"`);
     }
-    rest.push({ role: "tool", content: textContent(msg.content), toolCallId: msg.tool_call_id });
-  }
+    rest.push({ role: "tool", content: parseContent(msg.content, false).text, toolCallId: msg.tool_call_id });
+  });
 
   if (systemParts.length === 0) return rest;
   return [{ role: "system", content: systemParts.join("\n\n") }, ...rest];

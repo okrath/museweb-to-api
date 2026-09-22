@@ -1,7 +1,10 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Logger } from "pino";
 import type { Locator, Page } from "playwright";
 import type { GatewayConfig } from "../config.js";
-import type { DriverStatus, MuseDriver, MuseMode, TurnEvent, TurnInput, UsageOutcome } from "../core/types.js";
+import type { Attachment, DriverStatus, MuseDriver, MuseMode, TurnEvent, TurnInput, UsageOutcome } from "../core/types.js";
 import { MuseBrowser } from "./browser.js";
 import { htmlToMarkdown } from "./markdown.js";
 import {
@@ -44,6 +47,8 @@ const FIRST_TOKEN_TIMEOUT_MS = 180_000;
 const THREAD_RENDER_WAIT_MS = 15_000;
 const PANEL_OPEN_WAIT_MS = 6_000;
 const THREAD_LOAD_ATTEMPTS = 3;
+/** How long to wait for an attached file to show an upload preview before sending anyway. */
+const ATTACHMENT_UPLOAD_WAIT_MS = 20_000;
 /** Newest panel rows to try when looking for the thread that holds a freshly posted prompt. */
 const THREAD_ROW_CANDIDATES = 3;
 
@@ -89,6 +94,15 @@ function sameUrl(a: string, b: string): boolean {
 async function firstVisible(page: Page, list: string[]): Promise<Locator | undefined> {
   for (const selector of list) {
     const candidates = page.locator(selector).filter({ visible: true });
+    if ((await candidates.count().catch(() => 0)) > 0) return candidates.last();
+  }
+  return undefined;
+}
+
+/** Like `firstVisible` but does not require visibility; file inputs are commonly hidden. */
+async function firstExisting(page: Page, list: string[]): Promise<Locator | undefined> {
+  for (const selector of list) {
+    const candidates = page.locator(selector);
     if ((await candidates.count().catch(() => 0)) > 0) return candidates.last();
   }
   return undefined;
@@ -203,6 +217,47 @@ async function typePrompt(page: Page, composer: Locator, prompt: string): Promis
       "browser",
       `Muse composer did not accept the full prompt (expected ${prompt.length} chars, saw ${observed.length})`,
     );
+  }
+}
+
+/**
+ * Writes every attachment to a temp file and hands them to the composer's file input via
+ * `setInputFiles` (works on a hidden input, so no "attach" button needs to be clicked first).
+ * Returns a cleanup that removes the temp directory; on failure it cleans up and rethrows.
+ */
+async function attachFiles(page: Page, attachments: Attachment[], ctx: DriverContext): Promise<() => Promise<void>> {
+  const dir = await mkdtemp(join(tmpdir(), "mta-attach-"));
+  const cleanup = () => rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  try {
+    const paths = await Promise.all(
+      attachments.map(async (attachment, index) => {
+        const safeName = attachment.filename.replace(/[\\/:*?"<>|]/g, "_") || `attachment-${index}`;
+        const path = join(dir, `${index}-${safeName}`);
+        await writeFile(path, Buffer.from(attachment.data, "base64"));
+        return path;
+      }),
+    );
+    const input = await firstExisting(page, selectors.fileInput);
+    if (!input) {
+      throw new TurnError(
+        "browser",
+        'Muse file input not found; run "pnpm muse:probe" and update selectors.fileInput in src/muse/selectors.ts',
+      );
+    }
+    await input.setInputFiles(paths);
+
+    const preview = page.locator(selectors.attachmentPreview.join(",")).filter({ visible: true });
+    const deadline = Date.now() + ATTACHMENT_UPLOAD_WAIT_MS;
+    while (Date.now() < deadline && (await preview.count().catch(() => 0)) === 0) {
+      await sleep(POLL_MS);
+    }
+    if ((await preview.count().catch(() => 0)) === 0) {
+      ctx.log.warn("No visible attachment preview appeared after setInputFiles; sending anyway");
+    }
+    return cleanup;
+  } catch (err) {
+    await cleanup();
+    throw err;
   }
 }
 
@@ -367,63 +422,69 @@ export async function executeTurn(
   trace?.({ at: Date.now(), stage: "conversation_open", note: page.url() });
   await selectMode(page, input.mode, ctx);
 
-  await page.evaluate(markSeenScript, { root: selectors.conversationRoot });
-  const snapshotArgs = {
-    root: selectors.conversationRoot,
-    stop: selectors.stopButton,
-    composer: selectors.composer,
-    assistant: selectors.assistantMessage,
-    user: selectors.userMessage,
-    strip: selectors.strip,
-    alerts: selectors.alerts,
-    ignore: selectors.ignore,
-    promptHead: input.prompt.slice(0, 120),
-  };
-  const snapshot = () => page.evaluate(snapshotScript, snapshotArgs);
+  const cleanupAttachments =
+    input.attachments && input.attachments.length > 0 ? await attachFiles(page, input.attachments, ctx) : undefined;
+  try {
+    await page.evaluate(markSeenScript, { root: selectors.conversationRoot });
+    const snapshotArgs = {
+      root: selectors.conversationRoot,
+      stop: selectors.stopButton,
+      composer: selectors.composer,
+      assistant: selectors.assistantMessage,
+      user: selectors.userMessage,
+      strip: selectors.strip,
+      alerts: selectors.alerts,
+      ignore: selectors.ignore,
+      promptHead: input.prompt.slice(0, 120),
+    };
+    const snapshot = () => page.evaluate(snapshotScript, snapshotArgs);
 
-  const timings: ReaderTimings = {
-    stableMs: 1_500,
-    stableWithoutStopMs: 4_000,
-    firstTokenTimeoutMs: FIRST_TOKEN_TIMEOUT_MS,
-    stallTimeoutMs: ctx.config.stallTimeoutSec * 1000,
-    hardTimeoutMs: ctx.config.requestTimeoutSec * 1000,
-  };
+    const timings: ReaderTimings = {
+      stableMs: 1_500,
+      stableWithoutStopMs: 4_000,
+      firstTokenTimeoutMs: FIRST_TOKEN_TIMEOUT_MS,
+      stallTimeoutMs: ctx.config.stallTimeoutSec * 1000,
+      hardTimeoutMs: ctx.config.requestTimeoutSec * 1000,
+    };
 
-  const finishTurn = (text: string, conversationId: string | undefined) => {
-    if (conversationId) emit({ type: "conversation", conversationId });
-    emit({ type: "done", stopReason: "end_turn" });
-    trace?.({ at: Date.now(), stage: "done", note: conversationId });
-    return { text, conversationId };
-  };
+    const finishTurn = (text: string, conversationId: string | undefined) => {
+      if (conversationId) emit({ type: "conversation", conversationId });
+      emit({ type: "done", stopReason: "end_turn" });
+      trace?.({ at: Date.now(), stage: "done", note: conversationId });
+      return { text, conversationId };
+    };
 
-  if (input.conversationId) {
-    await typePrompt(page, composer, input.prompt);
-    trace?.({ at: Date.now(), stage: "prompt_typed" });
-    await submit(page, composer, snapshot, ctx);
-    trace?.({ at: Date.now(), stage: "submitted" });
-    const text = await readReply(page, ctx, input, snapshot, emit, timings, trace);
-    return finishTurn(text, conversationIdFromUrl(page.url(), ctx.config.museUrl));
+    if (input.conversationId) {
+      await typePrompt(page, composer, input.prompt);
+      trace?.({ at: Date.now(), stage: "prompt_typed" });
+      await submit(page, composer, snapshot, ctx);
+      trace?.({ at: Date.now(), stage: "submitted" });
+      const text = await readReply(page, ctx, input, snapshot, emit, timings, trace);
+      return finishTurn(text, conversationIdFromUrl(page.url(), ctx.config.museUrl));
+    }
+
+    // The whole new-thread turn is serialized per process: two parallel turns posting into
+    // `/thread/new` could otherwise claim each other's panel row.
+    return await serialized(async () => {
+      const rowsBefore = await ensureThreadPanel(page);
+      await typePrompt(page, composer, input.prompt);
+      trace?.({ at: Date.now(), stage: "prompt_typed" });
+      await submit(page, composer, snapshot, ctx);
+      trace?.({ at: Date.now(), stage: "submitted" });
+      const where = await resolveCreatedThread(page, ctx, rowsBefore, snapshot, timings.firstTokenTimeoutMs, trace);
+      const text = await readReply(page, ctx, input, snapshot, emit, timings, trace);
+      // Muse sometimes re-routes the draft page to the created thread on its own; only fall back
+      // to the panel when the URL still says `/thread/new`.
+      const conversationId =
+        conversationIdFromUrl(page.url(), ctx.config.museUrl) ??
+        (where === "draft" ? await resolveThreadAfterReply(page, ctx, snapshot, trace) : undefined);
+      const result = finishTurn(text, conversationId);
+      await enforceThreadCap(page, ctx);
+      return result;
+    });
+  } finally {
+    await cleanupAttachments?.();
   }
-
-  // The whole new-thread turn is serialized per process: two parallel turns posting into
-  // `/thread/new` could otherwise claim each other's panel row.
-  return serialized(async () => {
-    const rowsBefore = await ensureThreadPanel(page);
-    await typePrompt(page, composer, input.prompt);
-    trace?.({ at: Date.now(), stage: "prompt_typed" });
-    await submit(page, composer, snapshot, ctx);
-    trace?.({ at: Date.now(), stage: "submitted" });
-    const where = await resolveCreatedThread(page, ctx, rowsBefore, snapshot, timings.firstTokenTimeoutMs, trace);
-    const text = await readReply(page, ctx, input, snapshot, emit, timings, trace);
-    // Muse sometimes re-routes the draft page to the created thread on its own; only fall back
-    // to the panel when the URL still says `/thread/new`.
-    const conversationId =
-      conversationIdFromUrl(page.url(), ctx.config.museUrl) ??
-      (where === "draft" ? await resolveThreadAfterReply(page, ctx, snapshot, trace) : undefined);
-    const result = finishTurn(text, conversationId);
-    await enforceThreadCap(page, ctx);
-    return result;
-  });
 }
 
 /** Polls the transcript until the reply is complete, streaming finished paragraphs as it grows. */

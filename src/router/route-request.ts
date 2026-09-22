@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
 import { cacheKey, replayCachedEvents, type ResponseCache } from "../cache/response-cache.js";
 import type { GatewayConfig } from "../config.js";
-import type { ChatMessage, ChatRequest, MuseDriver, MuseMode, ToolCall, TurnEvent } from "../core/types.js";
+import type { Attachment, ChatMessage, ChatRequest, MuseDriver, MuseMode, ToolCall, TurnEvent } from "../core/types.js";
 import { renderTranscript } from "../prompt/render-transcript.js";
 import { createToolTextFilter, renderToolProtocol } from "../prompt/tool-protocol.js";
 import { RouteError } from "../protocol/errors.js";
@@ -51,6 +51,12 @@ function promptForRequest(req: ChatRequest, resume: boolean): string {
   return renderTranscript(req.messages, { resume, toolProtocol, toolsActive: resume && hasTools });
 }
 
+/** Attachments belong to the message this turn actually sends: the newest one, if it is from the user. */
+function attachmentsForRequest(req: ChatRequest): Attachment[] | undefined {
+  const newest = req.messages[req.messages.length - 1];
+  return newest?.role === "user" ? newest.attachments : undefined;
+}
+
 /**
  * Runs one driver turn and forwards its events. With `holdUntilContent` the events are held
  * back until the first content delta, so a resumed conversation that dies before answering
@@ -81,7 +87,7 @@ async function runOnce(
   };
 
   await deps.driver.runTurn(
-    { requestId: req.requestId, prompt, mode, conversationId, signal: req.clientAbort },
+    { requestId: req.requestId, prompt, mode, conversationId, attachments: attachmentsForRequest(req), signal: req.clientAbort },
     (event) => {
       if (event.type === "text_delta") {
         if (toolFilter) {

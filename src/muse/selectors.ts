@@ -53,6 +53,19 @@ export const selectors = {
   ],
   modeMenu: ['[role="menu"]', '[role="listbox"]', '[role="dialog"]'],
   modeOption: ['[role="menuitem"]', '[role="menuitemradio"]', '[role="option"]', 'button', 'li'],
+  /**
+   * File input the driver hands attachments to via `setInputFiles` (works even when hidden, so
+   * this does not need to be the visible "attach" button, itself `button[aria-label="Attach
+   * file"]`). Confirmed live 2026-09-22 with `pnpm muse:probe --attach`.
+   */
+  fileInput: ['input[type="file"]'],
+  /** Chip/thumbnail shown once an attached file finished uploading. Confirmed live 2026-09-22. */
+  attachmentPreview: [
+    '[data-testid*="attachment" i]',
+    '[class*="attachment" i]',
+    'button[aria-label*="remove attachment" i]',
+    'button[aria-label*="remove file" i]',
+  ],
   /** Visible surfaces that may carry an error, quota or delivery message. */
   alerts: ['[role="alert"]', '[role="dialog"]', '[role="status"]', '[aria-live]'],
   /**
