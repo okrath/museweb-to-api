@@ -1,4 +1,4 @@
-import type { DriverStatus, MuseDriver, TurnEvent, TurnInput } from "../../src/core/types.js";
+import type { DriverStatus, MuseDriver, TurnEvent, TurnInput, UsageOutcome } from "../../src/core/types.js";
 
 export interface FakeTurnScript {
   /** Markdown chunks streamed as text deltas. */
@@ -18,9 +18,18 @@ export class FakeDriver implements MuseDriver {
   private readonly scripts: FakeTurnScript[] = [];
   private fallback: FakeTurnScript = { chunks: ["Hello from Muse.\n\n", "Second paragraph."] };
   private newThreadCount = 0;
+  private usage: UsageOutcome = {
+    ok: true,
+    report: { entries: [{ label: "Free plan", detail: "Weekly limit resets on Sep 28", usedText: "20% used", percentUsed: 20 }] },
+  };
 
   enqueue(script: FakeTurnScript): this {
     this.scripts.push(script);
+    return this;
+  }
+
+  setUsage(outcome: UsageOutcome): this {
+    this.usage = outcome;
     return this;
   }
 
@@ -49,6 +58,10 @@ export class FakeDriver implements MuseDriver {
     }
     if (conversationId) emit({ type: "conversation", conversationId });
     emit({ type: "done", stopReason: "end_turn" });
+  }
+
+  async getUsage(): Promise<UsageOutcome> {
+    return this.usage;
   }
 
   async status(): Promise<DriverStatus> {

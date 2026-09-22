@@ -69,9 +69,29 @@ export interface DriverStatus {
   maxConcurrentTurns: number;
 }
 
+export interface UsageEntry {
+  /** e.g. "Free plan" or "Additional tokens". */
+  label: string;
+  /** e.g. "Weekly limit resets on Sep 28" or "Never expires". */
+  detail: string;
+  /** e.g. "20% used" or "0% used (3B tokens left)". */
+  usedText: string;
+  percentUsed: number;
+}
+
+export interface UsageReport {
+  entries: UsageEntry[];
+}
+
+export type UsageOutcome =
+  | { ok: true; report: UsageReport }
+  | { ok: false; kind: Extract<TurnEvent, { type: "error" }>["kind"]; message: string; retryAfterSec?: number };
+
 export interface MuseDriver {
   /** Runs one browser turn. Every failure surfaces as an `error` event followed by `done`. */
   runTurn(input: TurnInput, emit: (event: TurnEvent) => void): Promise<void>;
+  /** Reads the Settings > General usage meters (Muse's own account quota, not token counts). */
+  getUsage(): Promise<UsageOutcome>;
   status(): Promise<DriverStatus>;
   close(): Promise<void>;
 }

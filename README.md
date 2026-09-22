@@ -104,8 +104,21 @@ fail with an explicit error; use `muse` until a picker is found (see
 | `GET` | `/v1/models` | OpenAI shape, or Anthropic shape when `anthropic-version` is sent |
 | `POST` | `/v1/chat/completions` | OpenAI Chat Completions, streaming and non-streaming |
 | `POST` | `/v1/messages` | Anthropic Messages, streaming and non-streaming |
+| `GET` | `/v1/usage` | Muse's own account quota (Settings > General), not token counts |
 
 Auth: `Authorization: Bearer <key>` or `x-api-key: <key>`.
+
+`GET /v1/usage` reads the two usage meters Muse shows under Settings > General (a weekly plan
+quota and any additional tokens) by opening that dialog in a browser tab and closing it again:
+
+```json
+{
+  "entries": [
+    { "label": "Free plan", "detail": "Weekly limit resets on Sep 28", "usedText": "20% used", "percentUsed": 20 },
+    { "label": "Additional tokens", "detail": "Never expires", "usedText": "0% used (3B tokens left)", "percentUsed": 0 }
+  ]
+}
+```
 
 Response headers on every chat request: `x-mta-request-id`, `x-mta-model`, `x-mta-mode`,
 `x-mta-session-reused` (`1` when the turn continued an existing Muse chat),

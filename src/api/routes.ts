@@ -3,6 +3,7 @@ import type { MuseDriver } from "../core/types.js";
 import { listAnthropicModels, listOpenAiModels } from "../protocol/models.js";
 import { normalizeAnthropic } from "../protocol/normalize-anthropic.js";
 import { normalizeOpenAi } from "../protocol/normalize-openai.js";
+import { mapTurnError, sendMappedError } from "../protocol/errors.js";
 import type { RouteDeps } from "../router/route-request.js";
 import { handleChatRequest, wrapNormalize } from "./chat-handler.js";
 
@@ -26,6 +27,19 @@ export function registerApiRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return typeof anthropicVersion === "string" && anthropicVersion.length > 0
       ? listAnthropicModels()
       : listOpenAiModels();
+  });
+
+  /** Muse's own account quota (Settings > General), not token counts: those are always zero. */
+  app.get("/usage", async (_request, reply) => {
+    const outcome = await deps.driver.getUsage();
+    if (!outcome.ok) {
+      sendMappedError(
+        reply,
+        mapTurnError({ type: "error", kind: outcome.kind, message: outcome.message, retryAfterSec: outcome.retryAfterSec }, "openai"),
+      );
+      return;
+    }
+    return outcome.report;
   });
 
   app.post("/chat/completions", async (request, reply) => {

@@ -1,7 +1,9 @@
 /**
  * Functions executed inside the muse.ai page through `page.evaluate`. They must stay
  * self-contained: no imports, no closure over module state, only the `args` they receive.
+ * (Type-only imports are fine: they vanish at compile time and never reach the browser.)
  */
+import type { UsageEntry, UsageReport } from "../core/types.js";
 
 export interface SnapshotArgs {
   root: string[];
@@ -261,4 +263,23 @@ export function domReportScript(args: { composer: string[]; root: string[]; assi
     }));
   const modeLike = buttons.filter((b) => /instant|thinking|contemplat|mode|model|spark/i.test(`${b.text} ${b.ariaLabel}`));
   return { url: location.href, title: document.title, composers, buttons, roots, messages, modeLike };
+}
+
+/** Reads the usage meters (plan quota, additional tokens) from an open Settings dialog. */
+export function usageScript(args: { progressbar: string[] }): UsageReport {
+  const bars = args.progressbar.flatMap((s) => Array.from(document.querySelectorAll(s)));
+  const entries: UsageEntry[] = bars.map((el) => {
+    const row = el.parentElement;
+    const texts = (row ? Array.from(row.querySelectorAll('[data-slot="text"]')) : []).map((s) =>
+      (s.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    const percentAttr = el.getAttribute("aria-valuenow");
+    return {
+      label: texts[0] || el.getAttribute("aria-label") || "",
+      detail: texts[1] || "",
+      usedText: texts[2] || "",
+      percentUsed: percentAttr ? Number(percentAttr) : Number.NaN,
+    };
+  });
+  return { entries };
 }

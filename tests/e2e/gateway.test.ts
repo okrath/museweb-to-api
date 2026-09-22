@@ -28,6 +28,20 @@ describe("gateway", () => {
     expect(models.json().data.map((m: { id: string }) => m.id)).toContain("muse-spark-thinking");
   });
 
+  it("reports Muse's account usage, and maps a failed lookup to an error response", async () => {
+    const denied = await gateway.app.inject({ method: "GET", url: "/v1/usage" });
+    expect(denied.statusCode).toBe(401);
+
+    const ok = await gateway.app.inject({ method: "GET", url: "/v1/usage", headers: auth() });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ entries: [{ label: "Free plan", percentUsed: 20 }] });
+
+    gateway.driver.setUsage({ ok: false, kind: "auth", message: "Muse session is not signed in" });
+    const failed = await gateway.app.inject({ method: "GET", url: "/v1/usage", headers: auth() });
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json().error.message).toMatch(/not signed in/);
+  });
+
   it("answers a non-streaming OpenAI request and records the session", async () => {
     const res = await gateway.app.inject({
       method: "POST",

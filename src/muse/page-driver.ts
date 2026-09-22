@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { Locator, Page } from "playwright";
 import type { GatewayConfig } from "../config.js";
-import type { DriverStatus, MuseDriver, MuseMode, TurnEvent, TurnInput } from "../core/types.js";
+import type { DriverStatus, MuseDriver, MuseMode, TurnEvent, TurnInput, UsageOutcome } from "../core/types.js";
 import { MuseBrowser } from "./browser.js";
 import { htmlToMarkdown } from "./markdown.js";
 import {
@@ -29,6 +29,7 @@ import {
 } from "./selectors.js";
 import { enforceThreadCap } from "./thread-cleanup.js";
 import { createReaderState, decide, DeltaStreamer, type ReaderTimings } from "./turn-reader.js";
+import { readUsage } from "./usage.js";
 
 const POLL_MS = 250;
 const COMPOSER_WAIT_MS = 25_000;
@@ -566,6 +567,20 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
         const turnError = toTurnError(err);
         emit({ type: "error", kind: turnError.kind, message: turnError.message, retryAfterSec: turnError.retryAfterSec });
         emit({ type: "done", stopReason: "error" });
+      }
+    },
+    async getUsage(): Promise<UsageOutcome> {
+      let page: Page | undefined;
+      try {
+        page = await browser.acquirePage();
+        const report = await readUsage(page, ctx);
+        return { ok: true, report };
+      } catch (err) {
+        const turnError = toTurnError(err);
+        log.warn({ err: turnError.message }, "Muse usage lookup failed");
+        return { ok: false, kind: turnError.kind, message: turnError.message, retryAfterSec: turnError.retryAfterSec };
+      } finally {
+        if (page) browser.releasePage(page);
       }
     },
     async domReport(page) {

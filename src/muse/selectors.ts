@@ -66,6 +66,15 @@ export const selectors = {
   threadRowMenuButton: ['button[aria-label="More thread actions"]'],
   /** Confirmation dialog shown after choosing Delete from that menu. */
   threadDeleteConfirmDialog: ['[role="alertdialog"]', '[role="dialog"]'],
+  /** Opens the account dock menu (Keyboard shortcuts / Download apps / Report an issue / Settings). */
+  dockMoreButton: ['[data-testid="hatch-dock-more"]'],
+  /** Closes the Settings dialog. */
+  settingsCloseButton: ['button[aria-label="Close"]'],
+  /**
+   * The usage meters on Settings > General (plan quota, additional tokens), each an
+   * `aria-valuenow` progressbar. Calibrated 2026-09-22.
+   */
+  usageProgressbar: ['[role="dialog"] [role="progressbar"]'],
 };
 
 export const mainChatRowPattern = /^main chat\b/i;
@@ -74,6 +83,11 @@ export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;
 export const threadDeleteItemPattern = /^delete$/i;
 /** Identifies the confirm dialog among other dialogs by its own text. */
 export const threadDeleteConfirmPattern = /delete/i;
+/**
+ * The dock menu item that opens Settings. Its accessible text runs the "Ctrl+," shortcut hint
+ * straight into the label with no separating whitespace, so this must not end on a `\b`.
+ */
+export const settingsMenuItemPattern = /^settings/i;
 
 export const modeLabels: Record<Exclude<MuseMode, "default">, RegExp> = {
   instant: /instant/i,

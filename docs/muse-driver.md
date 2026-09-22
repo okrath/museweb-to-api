@@ -33,6 +33,12 @@ selector keep the driver limping (and the probe report useful) when Muse renames
 - **Mode picker**: none was found on the web UI (`modeLike: 0` in every probe). Models other
   than `muse` therefore fail with an explicit error until `modeMenuButton`/`modeOption` match
   something real.
+- **Account usage**: the left-nav dock's "..." button (`dockMoreButton`) opens a menu with a
+  "Settings" item (`settingsMenuItemPattern`); its default General tab shows two usage meters as
+  `role="progressbar"` elements (`usageProgressbar`) with `aria-valuenow` plus `[data-slot="text"]`
+  labels (plan name, reset/expiry note, "X% used" text). `readUsage` (`src/muse/usage.ts`) opens
+  it, reads both, and closes the dialog (`settingsCloseButton`, falling back to Escape) so the tab
+  stays usable for the next chat turn. Calibrated 2026-09-22.
 
 ## How a turn runs
 
