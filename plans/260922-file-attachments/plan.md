@@ -14,6 +14,22 @@ the driver does not click it (goes straight to the hidden file input) so no chan
 there. `fileInput`/`attachmentPreview` in `selectors.ts` are now marked calibrated instead of
 best-effort guesses.
 
+## Post-ship fix (2026-09-22): composer instability after attaching on a resumed turn
+
+Live use surfaced `locator.evaluate: Timeout 20000ms exceeded ... textarea[aria-label="Message"]`
+on a resumed/warm-thread turn with an attachment, which the router correctly retried as a fresh
+chat (existing `shouldRetryFresh` logic), but added real latency. Reproduced directly against the
+running gateway: a fresh-thread attachment answered in ~20 s every time; the same request
+resumed into an existing thread once took 4m37s (succeeded, `x-mta-session-reused: 1`, no retry
+needed that time) — consistent with the composer being transiently unstable right after the
+attachment's preview renders (layout reflow), which `composer.evaluate()`'s actionability check
+can lose the race against. Fix: `typePrompt` in `page-driver.ts` now retries its whole
+click-fill-verify sequence once after a 500 ms pause before failing for real — a bounded,
+same-page retry, not a Muse-usage-limit workaround. `pnpm lint/test/build` re-verified green
+after the change. The extra minutes-scale latency itself, when it isn't a failure, looks like
+Muse's own backend being slower to process a new image inside an existing conversation, not
+something the driver can fix; documented in `docs/muse-driver.md`.
+
 ## Outcome
 
 A client sending an OpenAI `image_url`/`file` content part, or an Anthropic

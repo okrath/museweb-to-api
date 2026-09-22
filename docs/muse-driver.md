@@ -41,7 +41,14 @@ selector keep the driver limping (and the probe report useful) when Muse renames
   20 s the driver logs a warning and sends anyway, so an unconfirmed upload is not by itself a
   hard failure; a genuinely missing `fileInput` is (see the table below). Live check: a 1×1 PNG
   attached this way was correctly described by Muse's reply ("một ảnh PNG chỉ có 1×1 pixel màu
-  đen").
+  đen"). The preview's layout reflow can leave the composer briefly not actionable right after
+  attaching, which failed `composer.evaluate()` on the context's 20 s action timeout in one
+  observed case; `typePrompt` now retries the whole type-and-verify step once after a short
+  pause before treating it as a real failure. Separately, attaching a file to an *existing*
+  (resumed) conversation was measured taking several minutes end to end versus ~20 s on a new
+  thread — likely Muse's own backend taking longer to fold a new image into an already-live
+  conversation, not a driver defect; `FIRST_TOKEN_TIMEOUT_MS` (180 s) already accounts for slow
+  first tokens, but a resumed turn with an attachment can still run close to that.
 - **Account usage**: the left-nav dock's "..." button (`dockMoreButton`) opens a menu with a
   "Settings" item (`settingsMenuItemPattern`); its default General tab shows two usage meters as
   `role="progressbar"` elements (`usageProgressbar`) with `aria-valuenow` plus `[data-slot="text"]`

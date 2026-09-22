@@ -202,7 +202,7 @@ async function selectMode(page: Page, mode: MuseMode, ctx: DriverContext): Promi
   );
 }
 
-async function typePrompt(page: Page, composer: Locator, prompt: string): Promise<void> {
+async function typePromptOnce(page: Page, composer: Locator, prompt: string): Promise<void> {
   await composer.click();
   await composer.fill(prompt).catch(() => undefined);
   if (acceptedPrompt(await composerText(composer), prompt)) return;
@@ -217,6 +217,21 @@ async function typePrompt(page: Page, composer: Locator, prompt: string): Promis
       "browser",
       `Muse composer did not accept the full prompt (expected ${prompt.length} chars, saw ${observed.length})`,
     );
+  }
+}
+
+/**
+ * Right after an attachment's preview renders, the composer can be transiently unstable
+ * (layout reflow makes it briefly not actionable), which fails `composer.evaluate()` with the
+ * context's 20 s action timeout. One retry after a short pause absorbs that without masking a
+ * real failure (a composer that stays broken still throws on the second attempt).
+ */
+async function typePrompt(page: Page, composer: Locator, prompt: string): Promise<void> {
+  try {
+    await typePromptOnce(page, composer, prompt);
+  } catch {
+    await sleep(500);
+    await typePromptOnce(page, composer, prompt);
   }
 }
 
