@@ -62,10 +62,18 @@ export const selectors = {
   threadPanel: ['[data-testid="hatch-side-chats-panel-shell"]'],
   threadPanelTrigger: ['[data-testid="hatch-chat-switcher-trigger"]'],
   threadRow: ['[data-testid="hatch-thread-row"]'],
+  /** Per-row "..." trigger; only rendered on hover/focus of its row (Pin/Rename/Archive/Delete). */
+  threadRowMenuButton: ['button[aria-label="More thread actions"]'],
+  /** Confirmation dialog shown after choosing Delete from that menu. */
+  threadDeleteConfirmDialog: ['[role="alertdialog"]', '[role="dialog"]'],
 };
 
 export const mainChatRowPattern = /^main chat\b/i;
 export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;
+/** Matches both the "Delete" menu item and the "Delete" button inside its confirm dialog. */
+export const threadDeleteItemPattern = /^delete$/i;
+/** Identifies the confirm dialog among other dialogs by its own text. */
+export const threadDeleteConfirmPattern = /delete/i;
 
 export const modeLabels: Record<Exclude<MuseMode, "default">, RegExp> = {
   instant: /instant/i,

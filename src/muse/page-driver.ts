@@ -27,6 +27,7 @@ import {
   threadUrlPattern,
   upstreamErrorPattern,
 } from "./selectors.js";
+import { enforceThreadCap } from "./thread-cleanup.js";
 import { createReaderState, decide, DeltaStreamer, type ReaderTimings } from "./turn-reader.js";
 
 const POLL_MS = 250;
@@ -418,7 +419,9 @@ export async function executeTurn(
     const conversationId =
       conversationIdFromUrl(page.url(), ctx.config.museUrl) ??
       (where === "draft" ? await resolveThreadAfterReply(page, ctx, snapshot, trace) : undefined);
-    return finishTurn(text, conversationId);
+    const result = finishTurn(text, conversationId);
+    await enforceThreadCap(page, ctx);
+    return result;
   });
 }
 

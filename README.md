@@ -153,10 +153,11 @@ client edits earlier messages, changes the system prompt, or switches mode; the 
 starts a fresh chat with the whole transcript rendered into one prompt. If a stored Muse chat
 can no longer be opened, the gateway retries once as a fresh chat before reporting an error.
 
-Nothing in the gateway deletes old side chats automatically, so a busy setup accumulates one
-per API conversation over time. If the panel gets crowded, open Muse, hover a side-chat row,
-click its "..." (More thread actions) button and choose Delete; deleting one a client still has
-cached simply falls back to a fresh chat on its next use.
+Every new API conversation adds one side chat to the panel; after each one the gateway deletes
+the oldest side chats down to `MAX_SIDE_THREADS` (10) so the panel does not grow without bound.
+This is best-effort: a failed cleanup only logs a warning and never fails the turn that
+triggered it. Deleting one that a client still has cached simply falls back to a fresh chat on
+its next use.
 
 Multi-turn clients should send `x-conversation-id` so two users with identical histories do
 not share a Muse chat. Sessions expire after `SESSION_TTL_SEC` (default one day; `0` disables

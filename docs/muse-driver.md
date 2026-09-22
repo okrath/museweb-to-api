@@ -13,7 +13,16 @@ selector keep the driver limping (and the probe report useful) when Muse renames
   turns it into a real thread. The gateway never writes into the main chat: every new API
   conversation starts at `/thread/new`, and the resulting thread URL is the conversation id
   stored for follow-ups. Side chats therefore accumulate in the user's panel, one per API
-  conversation, and can be deleted from the Muse UI.
+  conversation; `thread-cleanup.ts` deletes the oldest ones after each new-thread turn to keep
+  at most `MAX_SIDE_THREADS` (calibrated 2026-09-22).
+- **Deleting a side chat**: hover its row to reveal `button[aria-label="More thread actions"]`
+  (Radix dropdown; hidden by CSS until the row is hovered or focused, so a single `.hover()` can
+  miss it on a busy/re-rendering panel — retry). Its menu holds `Pin` / `Rename` / `Archive` /
+  `Delete`, each a plain `[role="menuitem"]` matched by text. Delete opens a confirm dialog
+  (`[role="dialog"]` or `[role="alertdialog"]`, text containing "delete") with its own `Delete`
+  button. The panel is virtualised beyond roughly 50 rows: rows past that need scrolling into
+  view before they exist in the DOM, which `thread-cleanup.ts` avoids by staying under the cap
+  instead of ever needing to find a row far down the list.
 - **Messages**: `[data-message-item]` with `data-message-role="user|assistant"` and a stable
   `data-message-id`. The assistant bubble is `[data-hatch-assistant-message-body]`; the rendered
   Markdown sits in a `.prose` container inside it. User items carry an sr-only "You:" label and,
@@ -99,6 +108,7 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | `mode "thinking" could not be selected` | `modeMenuButton` / `modeOption` / `modeLabels`; the web UI may simply not expose a picker |
 | Follow-ups never reuse the chat (`x-mta-session-reused: 0`) | the URL stayed on `/thread/new` after the reply; check `turn.trace[*].snapshot.url` and `conversationIdFromUrl` |
 | `504 Muse did not create a side chat … in time` while the reply is visible in the Muse UI | the panel changed in a way the driver did not recognise; compare the `threadRow` texts in `trace` before and after, and check `threadPanel`/`threadRow` selectors |
+| Side chats keep growing past `MAX_SIDE_THREADS`, or a `"Side-chat cleanup skipped"` warning appears | `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`/`threadDeleteConfirmPattern`; cleanup is best-effort and only logs a warning, it never fails the turn |
 | Timeout with `Delivery not confirmed` and many short-lived sockets | Muse's VM rejected the message; see the note below |
 
 ## Known Muse-side failure: oversized main chat
