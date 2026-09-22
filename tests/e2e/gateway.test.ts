@@ -291,6 +291,41 @@ describe("gateway", () => {
     expect(gateway.driver.calls[2]?.prompt).toContain("Now summarize it");
   });
 
+  it("reminds Muse the function protocol is still active on a resumed plain follow-up", async () => {
+    const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["Hi there."] });
+    await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth({ "x-conversation-id": "tools-reminder" }),
+      payload: { model: "muse", messages: [{ role: "user", content: "Hello" }], tools: [definition] },
+    });
+
+    // A resumed follow-up whose sent history carries no "tool" message at all (e.g. an agentic
+    // client that pruned an old function round out of context) must still remind Muse that
+    // function calls are expected, not just hand it the bare new question.
+    gateway.driver.enqueue({ chunks: ["Sure."] });
+    const second = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth({ "x-conversation-id": "tools-reminder" }),
+      payload: {
+        model: "muse",
+        messages: [
+          { role: "user", content: "Hello" },
+          { role: "assistant", content: "Hi there." },
+          { role: "user", content: "Now rename the untitled project" },
+        ],
+        tools: [definition],
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.headers["x-mta-session-reused"]).toBe("1");
+    expect(gateway.driver.calls[1]?.prompt).toContain("Now rename the untitled project");
+    expect(gateway.driver.calls[1]?.prompt).toContain("still inside the program");
+    expect(gateway.driver.calls[1]?.prompt.toLowerCase()).not.toMatch(/\btool\b|tool_call|channel|computer|execute/);
+  });
+
   it("serializes Anthropic tool_use and bypasses the response cache", async () => {
     const definition = { name: "read_file", input_schema: { type: "object" } };
     gateway.driver.enqueue({ chunks: ['```\n{"name":"read_file","arguments":{"path":"a.txt"}}\n```'] });

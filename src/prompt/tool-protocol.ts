@@ -12,6 +12,23 @@ export interface ParsedToolMarkdown {
 
 const continueInstruction = "Continue: reply to the end user, or request the next function in the same json format.";
 
+/**
+ * A resumed Muse conversation sends only the new message, never the whole transcript (see
+ * `render-transcript.ts`), so a plain follow-up question carries no trace of the protocol
+ * stated once at the start of the chat. Deep into a long conversation that first statement
+ * scrolls out of weight and Muse drifts back to its own persona (e.g. offering to connect a
+ * device instead of requesting a function). This restates the two rules that matter every time
+ * function calls are still expected, without repeating the full function list and schemas.
+ */
+export function renderToolReminder(): string {
+  return [
+    "Reminder, still inside the program from earlier in this chat: you decide which function to run next and",
+    'reply with one fenced json code block per call, `{"name": "...", "arguments": {...}}`.',
+    "Do not look anything up, browse, search, read files or act on your own, even if you could: requesting a",
+    "function is the only correct way to get information or act. Reply as plain text only when no function is needed.",
+  ].join(" ");
+}
+
 export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoice | undefined): string {
   if (tools.length === 0 || toolChoice === "none") return "";
 

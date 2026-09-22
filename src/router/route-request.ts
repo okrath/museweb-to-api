@@ -46,8 +46,9 @@ function createToolCallId(): string {
 }
 
 function promptForRequest(req: ChatRequest, resume: boolean): string {
-  const toolProtocol = !resume && req.tools && req.tools.length > 0 ? renderToolProtocol(req.tools, req.toolChoice) : undefined;
-  return renderTranscript(req.messages, { resume, toolProtocol });
+  const hasTools = Boolean(req.tools && req.tools.length > 0) && req.toolChoice !== "none";
+  const toolProtocol = !resume && hasTools ? renderToolProtocol(req.tools!, req.toolChoice) : undefined;
+  return renderTranscript(req.messages, { resume, toolProtocol, toolsActive: resume && hasTools });
 }
 
 /**

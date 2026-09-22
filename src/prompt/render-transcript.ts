@@ -1,13 +1,17 @@
 import type { ChatMessage } from "../core/types.js";
-import { renderToolResultBlocks, renderToolResults } from "./tool-protocol.js";
+import { renderToolReminder, renderToolResultBlocks, renderToolResults } from "./tool-protocol.js";
 
 export interface TranscriptOptions {
   resume?: boolean;
   toolProtocol?: string;
+  /** Resumed turn still expects function-call replies; see `renderToolReminder`. */
+  toolsActive?: boolean;
 }
 
-function renderResumedTranscript(messages: ChatMessage[]): string {
+function renderResumedTranscript(messages: ChatMessage[], toolsActive: boolean): string {
   const conversation = messages.filter((message) => message.role !== "system");
+  const withReminder = (text: string) => (toolsActive ? `${renderToolReminder()}\n\n${text}` : text);
+
   const lastToolIndex = conversation.map((message) => message.role).lastIndexOf("tool");
   if (lastToolIndex >= 0) {
     let flowStart = 0;
@@ -26,13 +30,19 @@ function renderResumedTranscript(messages: ChatMessage[]): string {
     if (newestUserIndex > lastToolIndex - flowStart) {
       const results = renderToolResultBlocks(flow);
       const promptResults = resultMarkers.length > 0 ? `${resultMarkers}\n${results}` : results;
-      return promptResults.length > 0 ? `${promptResults}\n\n${flow[newestUserIndex]!.content}` : flow[newestUserIndex]!.content;
+      const userText = flow[newestUserIndex]!.content;
+      // A plain follow-up question after an earlier function round: nothing else here reminds
+      // Muse that function calls are still expected, so this is the path that most needs it.
+      return withReminder(promptResults.length > 0 ? `${promptResults}\n\n${userText}` : userText);
     }
+    // Continuing the function round directly: `renderToolResults` already appends its own
+    // "Continue: ..." instruction, so no second reminder is stacked on top of it here.
     const results = renderToolResults(flow);
     return resultMarkers.length > 0 ? `${resultMarkers}\n${results}` : results;
   }
 
-  return [...conversation].reverse().find((message) => message.role === "user")?.content ?? "";
+  const lastUser = [...conversation].reverse().find((message) => message.role === "user")?.content ?? "";
+  return withReminder(lastUser);
 }
 
 function renderFullTranscript(conversation: ChatMessage[]): string {
@@ -77,7 +87,7 @@ export function renderTranscript(messages: ChatMessage[], opts?: TranscriptOptio
     conversation = messages.slice(1);
   }
 
-  if (opts?.resume) return renderResumedTranscript(messages);
+  if (opts?.resume) return renderResumedTranscript(messages, opts.toolsActive ?? false);
 
   const prompt = renderFullTranscript(conversation);
   const protocolPrompt = opts?.toolProtocol ? `${opts.toolProtocol}\n\n${prompt}` : prompt;
