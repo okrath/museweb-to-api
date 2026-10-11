@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import type { MuseDriver, TurnEvent } from "../core/types.js";
+import type { ThreadRegistry } from "../sessions/thread-registry.js";
 import { JsonStore } from "../store/json-store.js";
 import type { TurnSlots } from "./slots.js";
 
@@ -21,6 +22,7 @@ export interface WarmThreadPoolOptions {
   slots: TurnSlots;
   log: Pick<Logger, "debug" | "warn">;
   now?: () => number;
+  registry?: ThreadRegistry;
 }
 
 /** Persistent pool of side chats that have already completed their first turn. */
@@ -32,8 +34,9 @@ export class WarmThreadPool {
   private readonly driver: MuseDriver;
   private readonly slots: TurnSlots;
   private readonly log: Pick<Logger, "debug" | "warn">;
+  private readonly registry?: ThreadRegistry;
   private readonly abort = new AbortController();
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: NodeJS.Timeout | null = null;
   private started = false;
   private warming = false;
   private retryAfter = 0;
@@ -47,6 +50,7 @@ export class WarmThreadPool {
     this.driver = options.driver;
     this.slots = options.slots;
     this.log = options.log;
+    this.registry = options.registry;
     this.pruneExpired(this.clock());
   }
 
@@ -56,9 +60,13 @@ export class WarmThreadPool {
   }
 
   clear(): void {
-    this.store.prune(() => false);
+    this.store.prune((row) => {
+      this.registry?.retire(row.conversationId);
+      return false;
+    });
     this.store.flush();
   }
+
   /** Removes and returns one ready thread, oldest first. */
   take(now = this.clock()): WarmThread | undefined {
     if (this.target <= 0) return undefined;
@@ -110,7 +118,13 @@ export class WarmThreadPool {
   }
 
   private pruneExpired(now: number): void {
-    this.store.prune((row) => row.createdAt + this.ttlMs > now);
+    this.store.prune((row) => {
+      const keep = row.createdAt + this.ttlMs > now;
+      if (!keep) {
+        this.registry?.retire(row.conversationId);
+      }
+      return keep;
+    });
   }
 
   private async warmOne(): Promise<boolean> {
