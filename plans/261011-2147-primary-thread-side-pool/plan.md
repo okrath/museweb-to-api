@@ -1,7 +1,7 @@
 ---
 title: "One primary Muse thread, disposable side threads for subagents"
 description: "Route the main agent into one fixed side thread, give subagents clean warm threads, delete idle and retired threads, reload slow tabs."
-status: pending
+status: in-progress
 priority: P2
 effort: 2d
 branch: main
@@ -89,12 +89,12 @@ main agent always carries the delegation tool (`task`), subagents never do.
 
 | # | Phase | Status | Depends on |
 |---|---|---|---|
-| 1 | [Thread registry and classification](phase-01-thread-registry.md) | pending | — |
-| 2 | [Delete a thread by URL](phase-02-delete-thread-by-url.md) | pending | — |
-| 3 | [Route primary and side requests](phase-03-route-primary-and-side.md) | pending | 1, 2 |
-| 4 | [Thread reaper](phase-04-thread-reaper.md) | pending | 1, 2, 3 |
-| 5 | [Reload slow tabs](phase-05-reload-slow-tabs.md) | pending | — |
-| 6 | [Docs and live verification](phase-06-docs-and-live-verification.md) | pending | 1–5 |
+| 1 | [Thread registry and classification](phase-01-thread-registry.md) | done | — |
+| 2 | [Delete a thread by URL](phase-02-delete-thread-by-url.md) | done | — |
+| 3 | [Route primary and side requests](phase-03-route-primary-and-side.md) | done | 1, 2 |
+| 4 | [Thread reaper](phase-04-thread-reaper.md) | done | 1, 2, 3 |
+| 5 | [Reload slow tabs](phase-05-reload-slow-tabs.md) | done | — |
+| 6 | [Docs and live verification](phase-06-docs-and-live-verification.md) | done | 1–5 |
 
 ## Risks
 

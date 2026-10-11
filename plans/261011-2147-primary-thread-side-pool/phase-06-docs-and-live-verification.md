@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Docs and live verification"
-status: pending
+status: completed
 priority: P2
 effort: "2h"
 dependencies: [1, 2, 3, 4, 5]
@@ -29,3 +29,32 @@ Document the new thread model and prove acceptance criteria 1–6 against the re
 ## Verification
 - `pnpm lint`, `pnpm test`, build.
 - Live checklist above, with thread ids from the log.
+
+## Live results (2026-10-11, headless Edge, omp 18.8.7 and curl through the gateway)
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| 1. Main-agent turns share one thread, also across a restart | **pass** | run 1: four primary turns `resumed: true` on `4f065a1a`; after a gateway restart a follow-up resumed primary `c01e57d7` with `x-mta-session-reused: 1` |
+| 2. New main conversation rotates the primary and retires the old one | **pass** (rotation) / **blocked by Muse** (deletion) | `4f065a1a` → `3f2eedb9` → `6b4b53b9` → `c01e57d7`, each previous one marked `retired`; deleting the live ones was refused by Muse, see below |
+| 3. Parallel subagents get their own threads | **pass** | subagent turns ran on their own side thread (`5ea442a5`) while the primary stayed on `4f065a1a`; a tool-less or non-delegating request got `x-mta-thread-role: side` |
+| 4. Side thread deleted after 5 minutes idle | **pass** (selection) / **blocked by Muse** (deletion) | side `08ae8da7` last used 23:04:09, picked by the reaper at 23:09:25 |
+| 5. Gateway never deletes threads it did not create | **pass** | only registry ids were ever attempted |
+| 6. Slow tab reloaded | **calibrated, not triggered** | median `snapshotMs` 3–4 ms on every turn; default set to 250 ms (phase 5) |
+
+Defects found live and fixed (commits `bc0695a` and earlier):
+- `deleteThreadAt` reported success criteria on titles, which are not unique; it now uses the URL
+  and the panel row marked open.
+- A deleted thread's URL still opens (no redirect) with no row marked open; that now counts as
+  already deleted instead of failing forever. Verified: the reaper cleared `4f065a1a` and
+  `5ea442a5`, which had been deleted by hand.
+- Muse's refusal ("Failed to delete side chat" sonner toast) is now detected and logged.
+
+**Open: Muse refuses deletes.** Three deletes in a row succeeded (22:50–22:56); from about 22:57
+every delete of a still-existing thread was refused with "Failed to delete side chat", including
+hours-old warm threads and with a single tab and the gateway stopped. It looks like an
+account-side throttle. The reaper keeps those threads registered and retries with backoff
+(60 s per attempt, at most 10 minutes); no request is affected. Whether and when the refusals
+clear still needs watching on a longer-running gateway.
+
+Observed outside the gateway: Muse sometimes answers the main-agent turn itself instead of
+calling `task` ("the task tool isn't available in my toolset"), so a run may have no subagent.
