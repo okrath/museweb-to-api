@@ -238,6 +238,7 @@ See [`.env.example`](.env.example). The important knobs:
 | `STALL_TIMEOUT_SEC` | `180` | quiet time while generating that counts as hung |
 | `SESSION_TTL_SEC` | `86400` | conversation reuse window |
 | `CACHE_TTL_SEC` | `300` | exact-match response cache |
+| `LOG_LEVEL` | `info` | `debug` adds one `Chat request traffic` line per chat request: client headers (transport headers and any header whose name contains auth, token, key, secret, cookie or password are dropped), short hashes of the system prompt, tool set, conversation hint and first user message, the tool names, and the first 100 characters of the system prompt. Use it to see how a client's main agent and its subagents differ |
 
 ## Errors
 

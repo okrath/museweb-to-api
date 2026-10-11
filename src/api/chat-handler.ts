@@ -13,6 +13,7 @@ import { anthropicStreamFrames, serializeAnthropicMessage } from "../protocol/se
 import { openAiStreamFrames, serializeOpenAiCompletion } from "../protocol/serialize-openai.js";
 import { setStreamHeaders, startHeartbeat, writeComment, writeFrame } from "../protocol/sse.js";
 import { routeRequest, type RouteDeps, type RouteMeta } from "../router/route-request.js";
+import { trafficSummary } from "./traffic-log.js";
 
 const HEARTBEAT_MS = 15_000;
 
@@ -73,6 +74,9 @@ export async function handleChatRequest(
   deps: RouteDeps,
 ): Promise<void> {
   reply.header("x-mta-request-id", chatRequest.requestId);
+  // Hashing whole system prompts is only worth it when the debug line is actually written.
+  const log = deps.log as RouteDeps["log"] & { isLevelEnabled?: (level: string) => boolean };
+  if (log.isLevelEnabled?.("debug") ?? true) log.debug(trafficSummary(reply.request.headers, chatRequest), "Chat request traffic");
 
   let routed: Awaited<ReturnType<typeof routeRequest>>;
   try {
