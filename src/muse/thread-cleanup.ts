@@ -1,5 +1,5 @@
 import type { Locator, Page } from "playwright";
-import type { CleanThreadsResult } from "../core/types.js";
+import { ThreadDeleteRefusedError, type CleanThreadsResult } from "../core/types.js";
 import { threadRowsScript, type ThreadRow } from "./page-scripts.js";
 import { conversationIdFromUrl, mainChatRowPattern, selectors, threadDeleteFailedPattern, threadDeleteItemPattern } from "./selectors.js";
 
@@ -170,9 +170,8 @@ export async function deleteThreadAt(
   await confirmButton.click();
 
   // Muse sometimes refuses a delete and only says so in a "Failed to delete side chat" toast (seen
-  // live 2026-10-11 on fresh and hours-old chats alike; the same chats deleted fine minutes later),
-  // so wait for the panel to drop the row and report the toast otherwise; the reaper retries with
-  // backoff.
+  // live from 2026-10-11 on fresh and hours-old chats alike, for hours on end), so wait for the
+  // panel to drop the row and report the toast otherwise; the reaper then stops tracking the chat.
   const refusal = page.locator(selectors.toast.join(",")).filter({ hasText: threadDeleteFailedPattern }).first();
   const deadline = Date.now() + ROW_DROP_WAIT_MS;
   while (Date.now() < deadline) {
@@ -180,7 +179,7 @@ export async function deleteThreadAt(
     // The toast only stays a few seconds, so look for it while waiting.
     if (await refusal.isVisible().catch(() => false)) {
       const text = (await refusal.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-      throw new Error(`Muse refused to delete ${url}: "${text}"`);
+      throw new ThreadDeleteRefusedError(`Muse refused to delete ${url}: "${text}"`);
     }
     await page.waitForTimeout(250);
   }

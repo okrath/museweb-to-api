@@ -220,7 +220,9 @@ client edits earlier messages, changes the system prompt, or switches mode; the 
 starts a fresh chat with the whole transcript rendered into one prompt. If a stored Muse chat
 can no longer be opened, the gateway retries once as a fresh chat before reporting an error.
 
-Deletion runs in the background whenever a browser tab is free and never delays a request. A
+Deletion runs in the background whenever a browser tab is free and never delays a request. When
+Muse itself refuses a delete ("Failed to delete side chat"), the gateway stops tracking that chat
+and leaves it in Muse: its sessions are already gone, so no request lands there again. Any other
 failed deletion keeps the chat recorded and retries with backoff (up to 10 minutes). A client
 that comes back to a deleted chat simply starts a fresh one with the whole transcript.
 

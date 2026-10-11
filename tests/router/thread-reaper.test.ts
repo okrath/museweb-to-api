@@ -7,6 +7,7 @@ import { ThreadRegistry } from "../../src/sessions/thread-registry.js";
 import { TurnSlots } from "../../src/router/slots.js";
 import { ThreadReaper } from "../../src/router/thread-reaper.js";
 import { WarmThreadPool } from "../../src/router/warm-pool.js";
+import { ThreadDeleteRefusedError } from "../../src/core/types.js";
 import { FakeDriver } from "../helpers/fake-driver.js";
 
 const dirs: string[] = [];
@@ -166,6 +167,37 @@ describe("ThreadReaper", () => {
     await reaper.check();
     expect(driver.deletedThreads).toEqual([failId]);
     expect(registry.get(failId)).toBeUndefined();
+  });
+
+  it("stops tracking a thread Muse refuses to delete instead of retrying it", async () => {
+    const infos: unknown[] = [];
+    const reaper = new ThreadReaper({
+      driver,
+      registry,
+      sessions,
+      slots,
+      idleSec: 300,
+      cap: 10,
+      now: () => now,
+      log: { info: (obj) => infos.push(obj), warn: () => {}, debug: () => {} },
+    });
+
+    const refusedId = "https://muse.ai/thread/refused-1";
+    const nextId = "https://muse.ai/thread/next-1";
+    registry.touchSide(refusedId, now - 500_000);
+    registry.touchSide(nextId, now - 400_000);
+    driver.setDeleteError(new ThreadDeleteRefusedError("Muse refused to delete it"));
+
+    await reaper.check();
+
+    expect(registry.get(refusedId)).toBeUndefined();
+    expect(registry.get(nextId)).toBeUndefined();
+    expect(infos).toContainEqual(expect.objectContaining({ conversationId: refusedId }));
+
+    driver.setDeleteError(undefined);
+    now += 3_600_000;
+    await reaper.check();
+    expect(driver.deletedThreads).toEqual([]);
   });
 
   it("never deletes active primary thread unless retired", async () => {

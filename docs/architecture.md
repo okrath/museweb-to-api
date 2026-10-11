@@ -111,8 +111,10 @@ idle for `SIDE_THREAD_IDLE_SEC` (a failed turn that still created a chat records
 and the least recently used idle side chats beyond `MAX_SIDE_THREADS`. A chat with a turn in
 flight is never chosen; in-flight counts reset on restart. Session rows pointing at the chat are
 dropped before deleting it, so no request resumes a chat mid-deletion. A confirmed deletion, or a
-chat Muse already redirects away from, removes the registry row; a failed one backs off (60 s per
-attempt, at most 10 minutes). Only chats in the registry are ever deleted.
+chat Muse already redirects away from, removes the registry row. A delete Muse refuses
+(`ThreadDeleteRefusedError`) also removes the row and leaves the chat in Muse, because Muse kept
+refusing the same chats for hours; any other failure backs off (60 s per attempt, at most 10
+minutes). Only chats in the registry are ever deleted.
 
 ## Storage
 

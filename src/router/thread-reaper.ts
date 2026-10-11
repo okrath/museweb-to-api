@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { MuseDriver } from "../core/types.js";
+import { ThreadDeleteRefusedError, type MuseDriver } from "../core/types.js";
 import type { SessionStore } from "../sessions/session-store.js";
 import type { ThreadRegistry } from "../sessions/thread-registry.js";
 import type { TurnSlots } from "./slots.js";
@@ -149,6 +149,13 @@ export class ThreadReaper {
         );
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
+        if (error instanceof ThreadDeleteRefusedError) {
+          // Muse keeps refusing the same chat for hours, so retrying only spends a tab. Its
+          // sessions are already gone, so no request can land there again: leave it in Muse.
+          this.registry.forget(nextId);
+          this.log.info({ conversationId: nextId, err: error.message }, "Muse refused to delete thread; no longer tracking it");
+          continue;
+        }
         this.registry.noteRetireFailure(nextId, this.clock());
         this.log.warn(
           { conversationId: nextId, err: error.message },

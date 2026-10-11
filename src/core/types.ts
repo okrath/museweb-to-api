@@ -111,6 +111,15 @@ export interface MuseDriver {
   getUsage(): Promise<UsageOutcome>;
   status(): Promise<DriverStatus>;
   cleanAllThreads?(onProgress?: (progress: { deleted: number; totalKnown: number; title: string }) => void): Promise<CleanThreadsResult>;
+  /** Rejects with `ThreadDeleteRefusedError` when Muse itself declines the delete. */
   deleteThread?(conversationId: string): Promise<void>;
   close(): Promise<void>;
+}
+
+/** Muse answered a delete with its own refusal; retrying the same chat does not help. */
+export class ThreadDeleteRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ThreadDeleteRefusedError";
+  }
 }
