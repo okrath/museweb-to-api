@@ -53,4 +53,18 @@ export function registerApiRoutes(app: FastifyInstance, deps: RouteDeps): void {
     if (!chatRequest) return;
     await handleChatRequest(reply, chatRequest, request.body, deps);
   });
+
+  app.post("/clean-threads", async (_request, reply) => {
+    if (!deps.driver.cleanAllThreads) {
+      reply.status(501).send({ error: "Driver does not support cleaning threads" });
+      return;
+    }
+    const result = await deps.driver.cleanAllThreads((p) => {
+      deps.log.info({ deleted: p.deleted, title: p.title }, "Cleaned Muse thread");
+    });
+    deps.sessions.clear();
+    deps.warmPool?.clear();
+    deps.cache.clear();
+    return { ok: true, deleted: result.deleted, titles: result.titles };
+  });
 }

@@ -86,6 +86,12 @@ export class MuseBrowser {
     return page;
   }
 
+  /** Opens a dedicated tab outside the turn pool (e.g. for maintenance or inspection). Caller must close it. */
+  async openDedicatedPage(): Promise<Page> {
+    const context = await this.getContext();
+    return context.newPage();
+  }
+
   releasePage(page: Page): void {
     const entry = this.pool.find((candidate) => candidate.page === page);
     if (entry) entry.busy = false;

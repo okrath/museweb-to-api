@@ -186,6 +186,7 @@ export function snapshotScript(args: SnapshotArgs): PageSnapshot {
 export interface ThreadRow {
   index: number;
   text: string;
+  href?: string;
   visible: boolean;
 }
 
@@ -194,9 +195,12 @@ export function threadRowsScript(args: { row: string[] }): ThreadRow[] {
   const rows = args.row.map((s) => Array.from(document.querySelectorAll(s))).find((list) => list.length > 0) ?? [];
   return rows.map((el, index) => {
     const rect = el.getBoundingClientRect();
+    const anchor = el.tagName.toLowerCase() === "a" ? el : el.querySelector("a");
+    const href = anchor?.getAttribute("href") ?? el.getAttribute("href") ?? undefined;
     return {
       index,
       text: ((el as HTMLElement).innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+      href: href || undefined,
       visible: rect.width > 2 && rect.height > 2,
     };
   });

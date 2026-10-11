@@ -87,9 +87,13 @@ export class SessionStore {
   pruneExpired(now: number): number {
     return this.store.prune((row) => row.expiresAt > now);
   }
-
   get size(): number {
     return this.store.size;
+  }
+
+  clear(): void {
+    this.store.prune(() => false);
+    this.store.flush();
   }
 
   flush(): void {

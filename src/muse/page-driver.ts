@@ -30,10 +30,9 @@ import {
   threadUrlPattern,
   upstreamErrorPattern,
 } from "./selectors.js";
-import { enforceThreadCap } from "./thread-cleanup.js";
+import { deleteAllSideThreads, enforceThreadCap } from "./thread-cleanup.js";
 import { createReaderState, decide, DeltaStreamer, type ReaderTimings } from "./turn-reader.js";
 import { readUsage } from "./usage.js";
-
 const POLL_MS = 250;
 const COMPOSER_WAIT_MS = 25_000;
 const SUBMIT_CONFIRM_MS = 8_000;
@@ -666,6 +665,19 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
         assistant: selectors.assistantMessage,
         user: selectors.userMessage,
       });
+    },
+    async cleanAllThreads(onProgress) {
+      let page: Page | undefined;
+      try {
+        page = await browser.openDedicatedPage();
+        if (!page.url().startsWith(config.museUrl)) {
+          await page.goto(config.museUrl, { waitUntil: "domcontentloaded" });
+        }
+        await waitForComposer(page, config.museUrl, 20_000).catch(() => undefined);
+        return await deleteAllSideThreads(page, onProgress);
+      } finally {
+        if (page) await page.close().catch(() => undefined);
+      }
     },
     async status(): Promise<DriverStatus> {
       return { browserOpen: browser.isOpen, activeTurns: browser.busyCount, maxConcurrentTurns: config.maxConcurrentTurns };

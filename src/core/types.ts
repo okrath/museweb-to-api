@@ -99,11 +99,17 @@ export type UsageOutcome =
   | { ok: true; report: UsageReport }
   | { ok: false; kind: Extract<TurnEvent, { type: "error" }>["kind"]; message: string; retryAfterSec?: number };
 
+export interface CleanThreadsResult {
+  deleted: number;
+  titles: string[];
+}
+
 export interface MuseDriver {
   /** Runs one browser turn. Every failure surfaces as an `error` event followed by `done`. */
   runTurn(input: TurnInput, emit: (event: TurnEvent) => void): Promise<void>;
   /** Reads the Settings > General usage meters (Muse's own account quota, not token counts). */
   getUsage(): Promise<UsageOutcome>;
   status(): Promise<DriverStatus>;
+  cleanAllThreads?(onProgress?: (progress: { deleted: number; totalKnown: number; title: string }) => void): Promise<CleanThreadsResult>;
   close(): Promise<void>;
 }

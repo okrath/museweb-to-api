@@ -55,6 +55,10 @@ export class WarmThreadPool {
     return this.store.size;
   }
 
+  clear(): void {
+    this.store.prune(() => false);
+    this.store.flush();
+  }
   /** Removes and returns one ready thread, oldest first. */
   take(now = this.clock()): WarmThread | undefined {
     if (this.target <= 0) return undefined;
