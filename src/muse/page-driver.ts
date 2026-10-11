@@ -30,7 +30,7 @@ import {
   threadUrlPattern,
   upstreamErrorPattern,
 } from "./selectors.js";
-import { deleteAllSideThreads, enforceThreadCap } from "./thread-cleanup.js";
+import { deleteAllSideThreads, deleteThreadAt } from "./thread-cleanup.js";
 import { createReaderState, decide, DeltaStreamer, type ReaderTimings } from "./turn-reader.js";
 import { readUsage } from "./usage.js";
 const POLL_MS = 250;
@@ -493,7 +493,6 @@ export async function executeTurn(
         conversationIdFromUrl(page.url(), ctx.config.museUrl) ??
         (where === "draft" ? await resolveThreadAfterReply(page, ctx, snapshot, trace) : undefined);
       const result = finishTurn(text, conversationId);
-      await enforceThreadCap(page, ctx);
       return result;
     });
   } finally {
@@ -677,6 +676,17 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
         return await deleteAllSideThreads(page, onProgress);
       } finally {
         if (page) await page.close().catch(() => undefined);
+      }
+    },
+    async deleteThread(conversationId: string): Promise<void> {
+      const threadUrl = conversationIdFromUrl(conversationId, config.museUrl);
+      if (!threadUrl) throw new Error(`Not a Muse side-chat URL: "${conversationId}"`);
+      let page: Page | undefined;
+      try {
+        page = await browser.acquirePage();
+        await deleteThreadAt(page, threadUrl, waitForComposer);
+      } finally {
+        if (page) browser.releasePage(page);
       }
     },
     async status(): Promise<DriverStatus> {

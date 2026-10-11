@@ -1,14 +1,12 @@
 import type { Locator, Page } from "playwright";
 import type { CleanThreadsResult } from "../core/types.js";
-import type { DriverContext } from "./page-driver.js";
 import { threadRowsScript, type ThreadRow } from "./page-scripts.js";
-import { mainChatRowPattern, selectors, threadDeleteItemPattern } from "./selectors.js";
-/** Side chats kept before the oldest ones are deleted as new ones are created. */
-export const MAX_SIDE_THREADS = 10;
+import { conversationIdFromUrl, mainChatRowPattern, selectors, threadDeleteItemPattern } from "./selectors.js";
 
 const HOVER_RETRIES = 10;
 const HOVER_RETRY_MS = 400;
 const AFTER_DELETE_WAIT_MS = 700;
+const ACTIVE_ROW_SETTLE_MS = 3_000;
 
 async function sideRows(page: Page): Promise<ThreadRow[]> {
   const rows = await page.evaluate(threadRowsScript, { row: selectors.threadRow });
@@ -90,30 +88,100 @@ export async function deleteSideThread(page: Page, target: ThreadRow): Promise<v
     throw new Error(`thread "${target.text}" (${target.href ?? "no-href"}) is still present after delete confirm`);
   }
 }
-/** Deletes the single oldest side chat via its row menu. Throws on any unexpected page state. */
-async function deleteOldestSideThread(page: Page): Promise<void> {
-  const rows = await sideRows(page);
-  const oldest = rows.at(-1);
-  if (!oldest) throw new Error("no side-chat row left to delete");
-  await deleteSideThread(page, oldest);
+export interface ThreadDeletionCheck {
+  currentUrl: string;
+  targetUrl: string;
+  museUrl: string;
+  /** Whether the reloaded panel marks a row as the open thread (`aria-current="page"`). */
+  activeRowPresent: boolean;
 }
 
 /**
- * Keeps the side-chat panel from growing without bound: every new API conversation opens a new
- * Muse side chat (see `openConversation` in page-driver.ts) and nothing deletes them on its own.
- * Called once after a turn creates a new thread. Best-effort and never throws: a failed cleanup
- * must not fail the turn that triggered it, only skip housekeeping for this round. On any
- * unexpected page state the first delete attempt throws, which is caught here and logged once.
+ * After reloading a deleted thread's URL, the thread is gone when Muse redirected away from it or
+ * no panel row claims to be the open thread. Titles are not compared: Muse titles are not unique
+ * (every warm thread starts from the same prompt), so a matching title elsewhere proves nothing.
  */
-export async function enforceThreadCap(page: Page, ctx: DriverContext, cap = MAX_SIDE_THREADS): Promise<void> {
-  try {
-    let rows = await sideRows(page);
-    while (rows.length > cap) {
-      await deleteOldestSideThread(page);
-      rows = await sideRows(page);
-    }
-  } catch (err) {
-    ctx.log.warn({ err: err instanceof Error ? err.message : String(err) }, "Side-chat cleanup skipped");
+export function isThreadDeleted(check: ThreadDeletionCheck): boolean {
+  const current = conversationIdFromUrl(check.currentUrl, check.museUrl);
+  const target = conversationIdFromUrl(check.targetUrl, check.museUrl);
+  return current !== target || !check.activeRowPresent;
+}
+
+/**
+ * Deletes the thread at the given URL using the active-row method: navigates to the thread,
+ * ensures the panel is open, locates the active row ([aria-current="page"]), clicks Delete via
+ * its menu and confirms the dialog. Then reloads the URL and verifies the thread is gone.
+ * Throws on failure. Never falls back to an index or href.
+ */
+export async function deleteThreadAt(
+  page: Page,
+  url: string,
+  // Passed in rather than imported: page-driver.ts already imports this module.
+  waitForComposerFn: (page: Page, museUrl: string) => Promise<unknown>,
+): Promise<void> {
+  const museUrl = new URL(url).origin;
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await waitForComposerFn(page, museUrl);
+  await ensureThreadPanelOpen(page);
+
+  const activeRow = page.locator(selectors.threadActiveRow.join(",")).first();
+  await activeRow.waitFor({ state: "attached", timeout: 5000 }).catch(() => undefined);
+  const count = await page.locator(selectors.threadActiveRow.join(",")).count().catch(() => 0);
+  if (count === 0) {
+    throw new Error(`Active thread row not found in side panel for ${url}`);
+  }
+
+  await activeRow.scrollIntoViewIfNeeded().catch(() => undefined);
+  if (!(await activeRow.isVisible().catch(() => false))) {
+    throw new Error(`Active thread row not visible in side panel for ${url}`);
+  }
+
+  const title = (await activeRow.innerText().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 80);
+
+  const menuButton = await revealRowMenuButton(page, activeRow);
+  if (!menuButton) {
+    throw new Error(`"More thread actions" never became visible for active thread at ${url}`);
+  }
+  await menuButton.click();
+
+  const deleteItem = page.locator('[role="menuitem"]', { hasText: threadDeleteItemPattern }).first();
+  const deleteItemVisible = await deleteItem.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false);
+  if (!deleteItemVisible) {
+    await page.keyboard.press("Escape").catch(() => undefined);
+    throw new Error(`Delete menu item not found for active thread at ${url}`);
+  }
+  await deleteItem.click();
+
+  // Wait for the delete confirm dialog and its confirm button
+  const confirmDialog = page.locator(selectors.threadDeleteConfirmDialog.join(",")).first();
+  const confirmButton = confirmDialog.locator("button").filter({ hasText: /delete/i }).first();
+  const hasConfirm = await confirmButton.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false);
+  if (!hasConfirm) {
+    throw new Error(`Delete confirmation dialog button not found for active thread at ${url}`);
+  }
+  await confirmButton.click();
+
+  // Wait for confirm dialog to close or active row to detach
+  await Promise.race([
+    confirmDialog.waitFor({ state: "hidden", timeout: 4000 }).catch(() => undefined),
+    activeRow.waitFor({ state: "detached", timeout: 4000 }).catch(() => undefined),
+  ]);
+
+  // Reload the thread URL. Success only when the page no longer shows that thread.
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await ensureThreadPanelOpen(page);
+  // The panel renders its rows asynchronously; give the active row a moment before calling it gone.
+  const activeRowPresent = await page
+    .locator(selectors.threadActiveRow.join(","))
+    .first()
+    .waitFor({ state: "attached", timeout: ACTIVE_ROW_SETTLE_MS })
+    .then(() => true)
+    .catch(() => false);
+
+  const deleted = isThreadDeleted({ currentUrl: page.url(), targetUrl: url, museUrl, activeRowPresent });
+
+  if (!deleted) {
+    throw new Error(`thread "${title}" at ${url} is still present after deletion`);
   }
 }
 

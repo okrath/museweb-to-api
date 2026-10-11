@@ -75,6 +75,8 @@ export const selectors = {
   threadPanel: ['[data-testid="hatch-side-chats-panel-shell"]'],
   threadPanelTrigger: ['[data-testid="hatch-chat-switcher-trigger"]'],
   threadRow: ['[data-testid="hatch-thread-row"]'],
+  /** Side-chat panel row for the currently open thread. Calibrated 2026-10-11. */
+  threadActiveRow: ['[data-testid="hatch-thread-row"][aria-current="page"]'],
   /** Per-row "..." trigger; only rendered on hover/focus of its row (Pin/Rename/Archive/Delete). */
   threadRowMenuButton: ['button[aria-label="More thread actions"]'],
   /** Confirmation dialog shown after choosing Delete from that menu. */
