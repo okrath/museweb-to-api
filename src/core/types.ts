@@ -111,5 +111,6 @@ export interface MuseDriver {
   getUsage(): Promise<UsageOutcome>;
   status(): Promise<DriverStatus>;
   cleanAllThreads?(onProgress?: (progress: { deleted: number; totalKnown: number; title: string }) => void): Promise<CleanThreadsResult>;
+  deleteThread?(conversationId: string): Promise<void>;
   close(): Promise<void>;
 }

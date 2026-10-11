@@ -15,9 +15,11 @@ export interface FakeTurnScript {
  */
 export class FakeDriver implements MuseDriver {
   readonly calls: TurnInput[] = [];
+  readonly deletedThreads: string[] = [];
   private readonly scripts: FakeTurnScript[] = [];
   private fallback: FakeTurnScript = { chunks: ["Hello from Muse.\n\n", "Second paragraph."] };
   private newThreadCount = 0;
+  private deleteError?: Error;
   private usage: UsageOutcome = {
     ok: true,
     report: { entries: [{ label: "Free plan", detail: "Weekly limit resets on Sep 28", usedText: "20% used", percentUsed: 20 }] },
@@ -36,6 +38,17 @@ export class FakeDriver implements MuseDriver {
   setFallback(script: FakeTurnScript): this {
     this.fallback = script;
     return this;
+  }
+  setDeleteError(error?: Error): this {
+    this.deleteError = error;
+    return this;
+  }
+
+  async deleteThread(conversationId: string): Promise<void> {
+    if (this.deleteError) {
+      throw this.deleteError;
+    }
+    this.deletedThreads.push(conversationId);
   }
 
   async runTurn(input: TurnInput, emit: (event: TurnEvent) => void): Promise<void> {
