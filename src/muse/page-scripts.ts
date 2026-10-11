@@ -72,7 +72,6 @@ export function snapshotScript(args: SnapshotArgs): PageSnapshot {
   const hasUnseen = (el: Element) => !el.hasAttribute(SEEN) || el.querySelector(`:not([${SEEN}])`) !== null;
 
   const root = args.root.map((s) => document.querySelector(s)).find((el): el is Element => Boolean(el)) ?? document.body;
-  const stopVisible = query(args.stop).some(visible);
   const composerEl = firstVisible(args.composer);
   const composerText = composerEl
     ? (composerEl as HTMLTextAreaElement).value ?? (composerEl as HTMLElement).innerText ?? ""
@@ -87,6 +86,9 @@ export function snapshotScript(args: SnapshotArgs): PageSnapshot {
   const promptHead = normalize(args.promptHead);
   const echoesPrompt = (el: Element) => promptHead.length > 0 && normalize(el.textContent ?? "").includes(promptHead);
   const isChrome = (el: Element) => matchesAny(el, args.ignore) || args.ignore.some((s) => el.closest(s) !== null && el.closest(s) !== el);
+  // The status panel lists running agent tasks with their own "Stop task" buttons; only a stop
+  // control outside page chrome means the reply is still generating.
+  const stopVisible = query(args.stop).some((el) => visible(el) && !isChrome(el));
 
   // Newly inserted subtrees: unseen elements whose parent was already seen (or is the root).
   const fresh: Element[] = [];

@@ -145,6 +145,7 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | `502 Muse composer not found` although signed in | `selectors.composer`; check `dom.composers` |
 | Prompt typed but nothing posted (`promptPosted: false`) | `selectors.sendButton`; the driver otherwise presses Enter |
 | Reply cut off early | `stopButton` never matched, so completion used the 4 s quiet rule |
+| `Muse stopped updating its reply` although the reply is visible, `stopVisible` stays `true` | a stop-like control outside the composer matched `stopButton` (seen 2026-10-11: the status panel's per-task `Stop task` button). The snapshot ignores stop controls inside `ignore` regions, which already cover `hatch-status`; if a new container shows up, add it to `ignore` |
 | Reply contains "Copy" / toolbar text | add the control's selector to `strip` |
 | Wrong node picked as the reply | compare `candidateSummaries`; tighten `assistantMessage` |
 | `mode "thinking" could not be selected` | `modeMenuButton` / `modeOption` / `modeLabels`; the web UI may simply not expose a picker |
