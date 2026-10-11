@@ -122,6 +122,10 @@ export async function deleteThreadAt(
   const museUrl = new URL(url).origin;
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await waitForComposerFn(page, museUrl);
+  // Muse redirects away from a thread that no longer exists (deleted by hand or by
+  // clean-threads); that is the end state we want, so it counts as deleted. A missing active row
+  // on the thread's own URL still throws, so a broken selector never passes for a deletion.
+  if (conversationIdFromUrl(page.url(), museUrl) !== conversationIdFromUrl(url, museUrl)) return;
   await ensureThreadPanelOpen(page);
 
   const activeRow = page.locator(selectors.threadActiveRow.join(",")).first();

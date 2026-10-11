@@ -9,6 +9,7 @@ import type { ResponseCache } from "./cache/response-cache.js";
 import type { GatewayConfig } from "./config.js";
 import type { MuseDriver } from "./core/types.js";
 import { TurnSlots } from "./router/slots.js";
+import { ThreadReaper } from "./router/thread-reaper.js";
 import { WarmThreadPool } from "./router/warm-pool.js";
 import type { SessionStore } from "./sessions/session-store.js";
 import { ThreadRegistry } from "./sessions/thread-registry.js";
@@ -60,9 +61,26 @@ export async function buildServer(deps: BuildServerDeps): Promise<FastifyInstanc
     driver: deps.driver,
     slots,
     log: app.log as unknown as Logger,
+    registry,
   });
-  app.addHook("onListen", () => warmPool.start());
-  app.addHook("onClose", async () => warmPool.stop());
+  const reaper = new ThreadReaper({
+    driver: deps.driver,
+    registry,
+    sessions: deps.sessions,
+    slots,
+    log: app.log as unknown as Logger,
+    idleSec: deps.config.sideThreadIdleSec,
+    cap: deps.config.maxSideThreads,
+  });
+  app.addHook("onListen", () => {
+    warmPool.start();
+    reaper.start();
+  });
+  app.addHook("onClose", async () => {
+    await reaper.stop();
+    await warmPool.stop();
+    registry.flush();
+  });
 
   await app.register(
     async (scope) => {
@@ -76,6 +94,7 @@ export async function buildServer(deps: BuildServerDeps): Promise<FastifyInstanc
         primaryToolNames: deps.config.primaryToolNames,
         slots,
         warmPool,
+        reaper,
         log: app.log as Logger,
       });
     },

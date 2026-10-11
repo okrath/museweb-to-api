@@ -201,7 +201,14 @@ export async function routeRequest(
   if (warmThread) deps.warmPool?.check();
 
   const finish = (outcome: TurnOutcome, resumed: boolean) => {
-    if (outcome.error || (outcome.text.length === 0 && outcome.toolCalls.length === 0)) return;
+    if (outcome.error || (outcome.text.length === 0 && outcome.toolCalls.length === 0)) {
+      // A failed turn may still have created a Muse thread; record it as side so the reaper
+      // deletes it once idle instead of leaving it in the panel for good.
+      if (outcome.conversationId && deps.registry && !deps.registry.get(outcome.conversationId)) {
+        deps.registry.touchSide(outcome.conversationId, now());
+      }
+      return;
+    }
     const finishedAt = now();
     if (sessionsEnabled && outcome.conversationId) {
       const assistant: ChatMessage = { role: "assistant", content: outcome.text };

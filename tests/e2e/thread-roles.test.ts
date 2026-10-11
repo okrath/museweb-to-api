@@ -82,9 +82,11 @@ describe("thread roles and routing (e2e)", () => {
     expect(newPrimaryId).toBeDefined();
     expect(newPrimaryId).not.toBe(oldPrimaryId);
 
-    // Old primary is retired in registry
-    expect(gateway.registry.get(oldPrimaryId)?.role).toBe("retired");
+    // The rotation retires the old primary and nudges the reaper, which deletes it from Muse
+    await expect.poll(() => gateway.driver.deletedThreads).toContain(oldPrimaryId);
+    expect(gateway.registry.get(oldPrimaryId)).toBeUndefined();
     expect(gateway.registry.get(newPrimaryId)?.role).toBe("primary");
+    expect(gateway.driver.deletedThreads).not.toContain(newPrimaryId);
 
     // Old primary session rows are removed
     const allSessions = gateway.sessions["store"].values();
