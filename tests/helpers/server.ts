@@ -36,6 +36,7 @@ export function testConfig(dataDir: string, overrides?: Partial<GatewayConfig>):
     primaryToolNames: ["task", "Task", "Agent"],
     sideThreadIdleSec: 300,
     maxSideThreads: 10,
+    slowSnapshotMs: 1500,
     ...overrides,
   };
 }

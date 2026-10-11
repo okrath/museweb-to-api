@@ -5,7 +5,7 @@ import type { Logger } from "pino";
 import type { Locator, Page } from "playwright";
 import type { GatewayConfig } from "../config.js";
 import type { Attachment, DriverStatus, MuseDriver, MuseMode, TurnEvent, TurnInput, UsageOutcome } from "../core/types.js";
-import { MuseBrowser } from "./browser.js";
+import { computeMedian, MuseBrowser } from "./browser.js";
 import { htmlToMarkdown } from "./markdown.js";
 import {
   domReportScript,
@@ -431,7 +431,7 @@ export async function executeTurn(
   input: TurnInput,
   emit: (event: TurnEvent) => void,
   trace?: TurnTrace,
-): Promise<{ text: string; conversationId?: string }> {
+): Promise<{ text: string; conversationId?: string; snapshotMs?: number }> {
   const composer = await openConversation(page, ctx, input.conversationId);
   trace?.({ at: Date.now(), stage: "conversation_open", note: page.url() });
   await selectMode(page, input.mode, ctx);
@@ -461,11 +461,11 @@ export async function executeTurn(
       hardTimeoutMs: ctx.config.requestTimeoutSec * 1000,
     };
 
-    const finishTurn = (text: string, conversationId: string | undefined) => {
+    const finishTurn = (text: string, conversationId: string | undefined, snapshotMs?: number) => {
       if (conversationId) emit({ type: "conversation", conversationId });
       emit({ type: "done", stopReason: "end_turn" });
       trace?.({ at: Date.now(), stage: "done", note: conversationId });
-      return { text, conversationId };
+      return { text, conversationId, snapshotMs };
     };
 
     if (input.conversationId) {
@@ -473,8 +473,8 @@ export async function executeTurn(
       trace?.({ at: Date.now(), stage: "prompt_typed" });
       await submit(page, composer, snapshot, ctx);
       trace?.({ at: Date.now(), stage: "submitted" });
-      const text = await readReply(page, ctx, input, snapshot, emit, timings, trace);
-      return finishTurn(text, conversationIdFromUrl(page.url(), ctx.config.museUrl));
+      const reply = await readReply(page, ctx, input, snapshot, emit, timings, trace);
+      return finishTurn(reply.text, conversationIdFromUrl(page.url(), ctx.config.museUrl), reply.snapshotMs);
     }
 
     // The whole new-thread turn is serialized per process: two parallel turns posting into
@@ -486,14 +486,13 @@ export async function executeTurn(
       await submit(page, composer, snapshot, ctx);
       trace?.({ at: Date.now(), stage: "submitted" });
       const where = await resolveCreatedThread(page, ctx, rowsBefore, snapshot, timings.firstTokenTimeoutMs, trace);
-      const text = await readReply(page, ctx, input, snapshot, emit, timings, trace);
+      const reply = await readReply(page, ctx, input, snapshot, emit, timings, trace);
       // Muse sometimes re-routes the draft page to the created thread on its own; only fall back
       // to the panel when the URL still says `/thread/new`.
       const conversationId =
         conversationIdFromUrl(page.url(), ctx.config.museUrl) ??
         (where === "draft" ? await resolveThreadAfterReply(page, ctx, snapshot, trace) : undefined);
-      const result = finishTurn(text, conversationId);
-      return result;
+      return finishTurn(reply.text, conversationId, reply.snapshotMs);
     });
   } finally {
     await cleanupAttachments?.();
@@ -509,10 +508,11 @@ async function readReply(
   emit: (event: TurnEvent) => void,
   timings: ReaderTimings,
   trace?: TurnTrace,
-): Promise<string> {
+): Promise<{ text: string; snapshotMs?: number }> {
   const state = createReaderState(Date.now());
   const streamer = new DeltaStreamer();
   let lastHtml = "";
+  const snapshotTimes: number[] = [];
 
   while (true) {
     if (input.signal.aborted) {
@@ -520,7 +520,9 @@ async function readReply(
       await stop?.click().catch(() => undefined);
       throw new TurnError("browser", "client disconnected during the Muse turn");
     }
+    const snapStart = Date.now();
     const snap = await snapshot();
+    snapshotTimes.push(Date.now() - snapStart);
     trace?.({ at: Date.now(), stage: "poll", snapshot: snap });
     if (!isSignedInUrl(snap.url, ctx.config.museUrl)) {
       throw new TurnError("auth", "Muse signed the browser out during the turn; run \"pnpm muse:login\"");
@@ -566,7 +568,8 @@ async function readReply(
   if (finalMarkdown.length === 0) {
     throw new TurnError("browser", "Muse reply node was detected but converted to empty text");
   }
-  return finalMarkdown;
+  const snapshotMs = computeMedian(snapshotTimes);
+  return { text: finalMarkdown, snapshotMs };
 }
 
 export function toTurnError(err: unknown): TurnError {
@@ -601,6 +604,7 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
       headless: config.headless,
       channel: config.browserChannel,
       maxPages: config.maxConcurrentTurns,
+      slowSnapshotMs: config.slowSnapshotMs,
       log,
     });
   const ctx: DriverContext = { config, log };
@@ -608,7 +612,7 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
   async function acquire(conversationId: string | undefined): Promise<Page> {
     if (conversationId) {
       const parked = browser.idlePageAt(conversationId);
-      if (parked && browser.markBusy(parked)) return parked;
+      if (parked && (await browser.markBusy(parked))) return parked;
     }
     return browser.acquirePage();
   }
@@ -621,8 +625,18 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
       try {
         page = await acquire(input.conversationId);
         const result = await executeTurn(page, ctx, input, emit);
+        if (result.snapshotMs !== undefined) {
+          browser.noteSnapshotMs(page, result.snapshotMs);
+        }
         log.info(
-          { requestId: input.requestId, mode: input.mode, resumed: Boolean(input.conversationId), chars: result.text.length, ms: Date.now() - startedAt },
+          {
+            requestId: input.requestId,
+            mode: input.mode,
+            resumed: Boolean(input.conversationId),
+            chars: result.text.length,
+            ms: Date.now() - startedAt,
+            snapshotMs: result.snapshotMs,
+          },
           "Muse turn completed",
         );
       } catch (err) {

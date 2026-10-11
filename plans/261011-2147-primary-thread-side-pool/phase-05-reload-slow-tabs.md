@@ -31,3 +31,10 @@ time crosses a calibrated threshold.
 ## Verification
 - Unit: a tab marked over threshold is reloaded once on next acquire, then cleared.
 - Live: the log shows `snapshotMs` per turn; forcing a low threshold triggers one reload.
+
+## Results
+- **Calibration pending**: Default `SLOW_SNAPSHOT_MS` set to 1500; live browser calibration could not be executed in this environment. Recalibration with a live omp run will record actual healthy read medians and update this default if necessary.
+- Pure decision logic implemented in `src/muse/browser.ts`: `computeMedian` (median snapshot calculation), `noteTabSnapshot` (over-threshold evaluation and flagging), `consumeTabReload` (flag consumption and clearing on reload), `reloadSlowPage` (reload and composer wait).
+- In `src/muse/page-driver.ts`: each `snapshot()` call in `readReply` is timed, turn median `snapshotMs` is calculated and logged in `Muse turn completed`, and reported to `browser.noteSnapshotMs`.
+- In `src/muse/browser.ts`: `acquirePage` and `markBusy` reload flagged slow tabs before handing them out and log `snapshotMs`. The flag is cleared so each slow tab is reloaded only once.
+- Unit tests added in `tests/muse/reload-slow-tabs.test.ts` verifying median computation, threshold flagging, single-reload consumption lifecycle, and composer waiting without Playwright.

@@ -38,6 +38,7 @@ const configSchema = z.object({
   PRIMARY_TOOL_NAMES: z.string().default("task,Task,Agent"),
   SIDE_THREAD_IDLE_SEC: z.coerce.number().int().min(1).default(300),
   MAX_SIDE_THREADS: z.coerce.number().int().min(1).default(10),
+  SLOW_SNAPSHOT_MS: z.coerce.number().int().min(1).default(1500),
 });
 
 export interface GatewayConfig {
@@ -59,6 +60,7 @@ export interface GatewayConfig {
   primaryToolNames: string[];
   sideThreadIdleSec: number;
   maxSideThreads: number;
+  slowSnapshotMs: number;
 }
 
 export function loadConfig(options?: { envFile?: string | false; env?: NodeJS.ProcessEnv }): GatewayConfig {
@@ -95,5 +97,6 @@ export function loadConfig(options?: { envFile?: string | false; env?: NodeJS.Pr
       .filter((s) => s.length > 0),
     sideThreadIdleSec: env.SIDE_THREAD_IDLE_SEC,
     maxSideThreads: env.MAX_SIDE_THREADS,
+    slowSnapshotMs: env.SLOW_SNAPSHOT_MS,
   };
 }
