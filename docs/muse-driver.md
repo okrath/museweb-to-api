@@ -12,17 +12,20 @@ selector keep the driver limping (and the probe report useful) when Muse renames
   and *side chats* at `/thread/<uuid>`. `/thread/new` opens a draft side chat; the first message
   turns it into a real thread. The gateway never writes into the main chat: every new API
   conversation starts at `/thread/new`, and the resulting thread URL is the conversation id
-  stored for follow-ups. Side chats therefore accumulate in the user's panel, one per API
-  conversation; `thread-cleanup.ts` deletes the oldest ones after each new-thread turn to keep
-  at most `MAX_SIDE_THREADS` (calibrated 2026-09-22).
+  stored for follow-ups. The router records each side chat the gateway creates in
+  `threads.json` and a background reaper deletes retired and idle ones (see
+  `docs/architecture.md`). `/clear` in a side chat answers "Conversation cleared." but keeps the
+  context (verified 2026-10-11), so a used side chat is never reused for another conversation.
 - **Deleting a side chat**: hover its row to reveal `button[aria-label="More thread actions"]`
   (Radix dropdown; hidden by CSS until the row is hovered or focused, so a single `.hover()` can
   miss it on a busy/re-rendering panel — retry). Its menu holds `Pin` / `Rename` / `Archive` /
   `Delete`, each a plain `[role="menuitem"]` matched by text. Delete opens a confirm dialog
   (`[role="dialog"]` or `[role="alertdialog"]`, text containing "delete") with its own `Delete`
-  button. The panel is virtualised beyond roughly 50 rows: rows past that need scrolling into
-  view before they exist in the DOM, which `thread-cleanup.ts` avoids by staying under the cap
-  instead of ever needing to find a row far down the list.
+  button. The panel is virtualised beyond roughly 50 rows, and rows expose no `href`, so a row
+  cannot be found by URL. `deleteThreadAt` (`thread-cleanup.ts`) therefore opens the thread's
+  own URL and acts on the row Muse marks as open (`threadActiveRow`, `aria-current="page"`), then
+  reloads the URL: the thread is gone when Muse redirects away or no row is marked open.
+  Titles are never compared, because they are not unique (verified 2026-10-11).
 - **Messages**: `[data-message-item]` with `data-message-role="user|assistant"` and a stable
   `data-message-id`. The assistant bubble is `[data-hatch-assistant-message-body]`; the rendered
   Markdown sits in a `.prose` container inside it. User items carry an sr-only "You:" label and,
@@ -153,7 +156,7 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | Attachment sent but Muse never appears to receive the file, with no error | `attachmentPreview` did not match anything real, so the driver only logged a warning and sent early; tighten it from a probe run taken right after attaching |
 | Follow-ups never reuse the chat (`x-mta-session-reused: 0`) | the URL stayed on `/thread/new` after the reply; check `turn.trace[*].snapshot.url` and `conversationIdFromUrl` |
 | `504 Muse did not create a side chat … in time` while the reply is visible in the Muse UI | the panel changed in a way the driver did not recognise; compare the `threadRow` texts in `trace` before and after, and check `threadPanel`/`threadRow` selectors |
-| Side chats keep growing past `MAX_SIDE_THREADS`, or a `"Side-chat cleanup skipped"` warning appears | `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`/`threadDeleteConfirmPattern`; cleanup is best-effort and only logs a warning, it never fails the turn |
+| Side chats keep growing past `MAX_SIDE_THREADS`, or the reaper keeps logging failed deletions | `threadActiveRow` (the open thread's row must carry `aria-current="page"`), `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`; a failed deletion stays in `threads.json` and is retried with backoff, it never fails a turn |
 | Timeout with `Delivery not confirmed` and many short-lived sockets | Muse's VM rejected the message; see the note below |
 | Muse answers in prose, or offers to connect a device / access files directly, on a later turn of a tool-using conversation | the resumed-turn reminder is missing or too weak; see "Keeping the function-call protocol alive on resumed turns" and `renderToolReminder` in `src/prompt/tool-protocol.ts` |
 

@@ -39,11 +39,16 @@ Fastify gateway (src/server.ts)
    renders only the newest user message, or the latest function results plus the next user
    message; otherwise it renders the whole transcript into one prompt (Muse has no composer
    limit). A fresh prompt places `prompt/tool-protocol.ts` after the system section.
-5. **Warm pool and slot.** `router/warm-pool.ts` keeps pre-created side-chat ids in
-   `warm-threads.json` and refills the pool in the background after the listener starts. A new
-   request with no resumable session takes one ready id and sends the full transcript into that
-   side chat; the pool refills in parallel. `router/slots.ts` is a counting semaphore sized
-   `MAX_CONCURRENT_TURNS`; waiting longer than `QUEUE_TIMEOUT_SEC` yields `503`.
+5. **Thread role, warm pool and slot.** `router/thread-role.ts` classifies the request: one
+   whose function definitions include a delegation tool (`PRIMARY_TOOL_NAMES`) is a client's
+   main agent (**primary**), anything else is **side**. A primary request resumes the single
+   primary side chat when its history matches; otherwise it takes a clean side chat and, once
+   the turn succeeds, that chat becomes the primary and the previous one is retired. A side
+   request resumes its own chat or takes a clean one. `router/warm-pool.ts` keeps pre-created
+   side-chat ids in `warm-threads.json` and refills the pool in the background after the
+   listener starts; a request with no resumable session takes one ready id and sends the full
+   transcript into it. `router/slots.ts` is a counting semaphore sized `MAX_CONCURRENT_TURNS`;
+   waiting longer than `QUEUE_TIMEOUT_SEC` yields `503`.
 6. **Turn.** `router/route-request.ts` runs `driver.runTurn` and bridges its callback events into
    an async iterable (`router/event-channel.ts`). When functions are active, the router holds text
    from the first possible fenced block (including the observed detached `json` line), parses
@@ -54,7 +59,8 @@ Fastify gateway (src/server.ts)
    as a fresh chat, so the client never sees the failed attempt. Rate-limit and sign-in failures
    are not retried.
 7. **Finish.** On success the router stores the new fingerprint (history + reply → conversation
-   URL) and the cache body. The serializers stream `TurnEvent`s as OpenAI chunks or Anthropic
+   URL), records the chat's role and last-turn time in `sessions/thread-registry.ts`
+   (`threads.json`, which also counts turns in flight), and stores the cache body. The serializers stream `TurnEvent`s as OpenAI chunks or Anthropic
    SSE events; a failure before any content becomes a proper HTTP status, a failure after
    content becomes an in-stream error frame.
 
@@ -91,10 +97,26 @@ conversation URL, avoiding a navigation.
 All timeouts come from config: first token 120 s, `STALL_TIMEOUT_SEC` while generating,
 `REQUEST_TIMEOUT_SEC` overall.
 
+A turn also times its page reads; when the median for a turn exceeds `SLOW_SNAPSHOT_MS`,
+`browser.ts` reloads that tab before handing it to the next turn (a long transcript makes the
+page heavy, a reload resets it).
+
+## Thread housekeeping
+
+`router/thread-reaper.ts` runs every 30 seconds and after each primary rotation. It only takes a
+browser slot when one is free (`acquire(0)`), so it never delays a request, and deletes one chat
+at a time with `driver.deleteThread` (see "Deleting a side chat" in `docs/muse-driver.md`):
+retired chats (old primaries, chats abandoned by a fresh retry, expired warm chats), side chats
+idle for `SIDE_THREAD_IDLE_SEC`, and the least recently used idle side chats beyond
+`MAX_SIDE_THREADS`. A chat with a turn in flight is never chosen; in-flight counts reset on
+restart. A confirmed deletion removes the registry row and every session row pointing at the
+chat; a failed one backs off (60 s per attempt, at most 10 minutes). Only chats in the registry
+are ever deleted.
+
 ## Storage
 
 `DATA_DIR` holds `browser-profile/` (sensitive: it authorizes Muse access), `api-key.txt`
-(mode 0600), `sessions.json`, `response-cache.json`, `warm-threads.json` and `probe-*/`
+(mode 0600), `sessions.json`, `response-cache.json`, `warm-threads.json`, `threads.json` and `probe-*/`
 reports. Stores are debounced atomic JSON writes (`store/json-store.ts`); expired rows are
 pruned hourly and on start.
 

@@ -122,7 +122,8 @@ quota and any additional tokens) by opening that dialog in a browser tab and clo
 
 Response headers on every chat request: `x-mta-request-id`, `x-mta-model`, `x-mta-mode`,
 `x-mta-session-reused` (`1` when the turn continued an existing Muse chat),
-`x-mta-cache-hit`, `x-mta-warm-thread` (`1` when a pre-created side chat was used), and
+`x-mta-cache-hit`, `x-mta-warm-thread` (`1` when a pre-created side chat was used),
+`x-mta-thread-role` (`primary` or `side`, see "Sessions and cache"), and
 `x-mta-conversation-id` when a resumed or cached Muse chat URL is known up front.
 
 Not supported: `response_format`, token usage (reported as zero where the wire format requires
@@ -191,10 +192,24 @@ as suspected injections, so keep client system prompts short.
 
 ## Sessions and cache
 
-Muse has one *main chat* plus *side chats*. The gateway never touches the main chat: every new
-API conversation starts a fresh side chat (`/thread/new`) and the resulting thread URL becomes
-the conversation id, so parallel API conversations stay isolated from each other and from the
-user's own chatting. Side chats therefore pile up in the Muse panel, one per API conversation.
+Muse has one *main chat* plus *side chats*. The gateway never touches the main chat; it works
+only in side chats (`/thread/<id>`), and the thread URL is the conversation id. Two roles:
+
+- **Primary.** A request whose function definitions include a delegation tool
+  (`PRIMARY_TOOL_NAMES`, default `task`, `Task`, `Agent`) comes from a client's main agent. All
+  of its turns go to one fixed side chat. When the history no longer matches (a new client
+  conversation), the gateway moves the primary to a clean side chat with the whole transcript
+  and deletes the old one in the background.
+- **Side.** Everything else (subagents, which never carry the delegation tool, and tool-less
+  requests such as title generation) gets its own clean side chat and continues there on
+  follow-ups. A side chat whose last turn ended more than `SIDE_THREAD_IDLE_SEC` ago is deleted
+  together with its session; beyond `MAX_SIDE_THREADS` the least recently used idle one is
+  deleted first.
+
+A side chat that already has content is never handed to another conversation (Muse's `/clear`
+does not reset a side chat's context), and a chat with a turn still running is never deleted.
+The gateway only deletes side chats it created itself, recorded in `threads.json`; side chats
+you open yourself are left alone.
 
 Every completed response is fingerprinted from the `x-conversation-id` header (or the OpenAI
 `user` / Anthropic `metadata.user_id` field), the function definitions when present, plus the
@@ -205,11 +220,12 @@ client edits earlier messages, changes the system prompt, or switches mode; the 
 starts a fresh chat with the whole transcript rendered into one prompt. If a stored Muse chat
 can no longer be opened, the gateway retries once as a fresh chat before reporting an error.
 
-Every new API conversation adds one side chat to the panel; after each one the gateway deletes
-the oldest side chats down to `MAX_SIDE_THREADS` (10) so the panel does not grow without bound.
-This is best-effort: a failed cleanup only logs a warning and never fails the turn that
-triggered it. Deleting one that a client still has cached simply falls back to a fresh chat on
-its next use.
+Deletion runs in the background whenever a browser tab is free and never delays a request. A
+failed deletion keeps the chat recorded and retries with backoff (up to 10 minutes). A client
+that comes back to a deleted chat simply starts a fresh one with the whole transcript.
+
+With the default `MAX_CONCURRENT_TURNS=2`, a main agent plus one subagent fill the browser: a
+second parallel subagent waits for a tab, and warm side chats are not refilled until one frees.
 
 Multi-turn clients should send `x-conversation-id` so two users with identical histories do
 not share a Muse chat. Sessions expire after `SESSION_TTL_SEC` (default one day; `0` disables
@@ -238,6 +254,10 @@ See [`.env.example`](.env.example). The important knobs:
 | `STALL_TIMEOUT_SEC` | `180` | quiet time while generating that counts as hung |
 | `SESSION_TTL_SEC` | `86400` | conversation reuse window |
 | `CACHE_TTL_SEC` | `300` | exact-match response cache |
+| `PRIMARY_TOOL_NAMES` | `task,Task,Agent` | comma-separated delegation tool names; a request carrying one is a main agent and uses the primary side chat |
+| `SIDE_THREAD_IDLE_SEC` | `300` | a side chat idle this long after its last turn is deleted |
+| `MAX_SIDE_THREADS` | `10` | gateway-created side chats kept at most; the least recently used idle one is deleted first |
+| `SLOW_SNAPSHOT_MS` | `1500` | a tab whose page reads take longer than this (median over a turn) is reloaded before its next turn |
 | `LOG_LEVEL` | `info` | `debug` adds one `Chat request traffic` line per chat request: client headers (transport headers and any header whose name contains auth, token, key, secret, cookie or password are dropped), short hashes of the system prompt, tool set, conversation hint and first user message, the tool names, and the first 100 characters of the system prompt. Use it to see how a client's main agent and its subagents differ |
 
 ## Errors
