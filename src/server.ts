@@ -11,6 +11,7 @@ import type { MuseDriver } from "./core/types.js";
 import { TurnSlots } from "./router/slots.js";
 import { WarmThreadPool } from "./router/warm-pool.js";
 import type { SessionStore } from "./sessions/session-store.js";
+import { ThreadRegistry } from "./sessions/thread-registry.js";
 
 export interface BuildServerDeps {
   config: GatewayConfig;
@@ -18,6 +19,7 @@ export interface BuildServerDeps {
   driver: MuseDriver;
   sessions: SessionStore;
   cache: ResponseCache;
+  registry?: ThreadRegistry;
   version: string;
   logger?: Logger | false;
 }
@@ -50,6 +52,7 @@ export async function buildServer(deps: BuildServerDeps): Promise<FastifyInstanc
   registerHealthRoute(app, deps.version, deps.driver);
 
   const slots = new TurnSlots(deps.config.maxConcurrentTurns);
+  const registry = deps.registry ?? new ThreadRegistry(join(deps.config.dataDir, "threads.json"));
   const warmPool = new WarmThreadPool({
     path: join(deps.config.dataDir, "warm-threads.json"),
     ttlSec: deps.config.sessionTtlSec,
@@ -69,6 +72,8 @@ export async function buildServer(deps: BuildServerDeps): Promise<FastifyInstanc
         driver: deps.driver,
         sessions: deps.sessions,
         cache: deps.cache,
+        registry,
+        primaryToolNames: deps.config.primaryToolNames,
         slots,
         warmPool,
         log: app.log as Logger,

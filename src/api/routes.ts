@@ -65,6 +65,7 @@ export function registerApiRoutes(app: FastifyInstance, deps: RouteDeps): void {
     deps.sessions.clear();
     deps.warmPool?.clear();
     deps.cache.clear();
+    deps.registry?.clear();
     return { ok: true, deleted: result.deleted, titles: result.titles };
   });
 }

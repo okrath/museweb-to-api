@@ -2,14 +2,25 @@ import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
 import { cacheKey, replayCachedEvents, type ResponseCache } from "../cache/response-cache.js";
 import type { GatewayConfig } from "../config.js";
-import type { Attachment, ChatMessage, ChatRequest, MuseDriver, MuseMode, ToolCall, TurnEvent } from "../core/types.js";
-import { renderTranscript } from "../prompt/render-transcript.js";
-import { createToolTextFilter, renderToolProtocol } from "../prompt/tool-protocol.js";
+import type { ChatMessage, ChatRequest, MuseDriver, MuseMode, ToolCall, TurnEvent } from "../core/types.js";
+import { createToolTextFilter } from "../prompt/tool-protocol.js";
 import { RouteError } from "../protocol/errors.js";
 import { findModel, resolveMode } from "../protocol/models.js";
 import { fingerprint, lookupFingerprint, type SessionStore } from "../sessions/session-store.js";
+import type { ThreadRegistry } from "../sessions/thread-registry.js";
 import { createEventChannel } from "./event-channel.js";
 import type { TurnSlots } from "./slots.js";
+import {
+  attachmentsForRequest,
+  DEFAULT_PRIMARY_TOOLS,
+  pickResumeSession,
+  promptForRequest,
+  registerTurnOutcome,
+  retireOnRetryFresh,
+  shouldRetryFresh,
+  threadRole,
+  type ThreadRole,
+} from "./thread-role.js";
 import type { WarmThreadPool } from "./warm-pool.js";
 
 export interface RouteMeta {
@@ -20,6 +31,7 @@ export interface RouteMeta {
   warmThread: boolean;
   /** Known up front for a resumed conversation or cache hit. */
   conversationId?: string;
+  threadRole: ThreadRole;
 }
 
 export interface RouteDeps {
@@ -29,6 +41,9 @@ export interface RouteDeps {
   cache: ResponseCache;
   slots: TurnSlots;
   warmPool?: WarmThreadPool;
+  registry?: ThreadRegistry;
+  primaryToolNames?: readonly string[];
+  reaper?: { check: () => void | Promise<void> };
   log: Pick<Logger, "debug" | "info" | "warn" | "error">;
   now?: () => number;
 }
@@ -45,18 +60,6 @@ function createToolCallId(): string {
   return `call_${randomBytes(18).toString("base64url")}`;
 }
 
-function promptForRequest(req: ChatRequest, resume: boolean): string {
-  const hasTools = Boolean(req.tools && req.tools.length > 0) && req.toolChoice !== "none";
-  const toolProtocol = !resume && hasTools ? renderToolProtocol(req.tools!, req.toolChoice) : undefined;
-  return renderTranscript(req.messages, { resume, toolProtocol, toolsActive: resume && hasTools });
-}
-
-/** Attachments belong to the message this turn actually sends: the newest one, if it is from the user. */
-function attachmentsForRequest(req: ChatRequest): Attachment[] | undefined {
-  const newest = req.messages[req.messages.length - 1];
-  return newest?.role === "user" ? newest.attachments : undefined;
-}
-
 /**
  * Runs one driver turn and forwards its events. With `holdUntilContent` the events are held
  * back until the first content delta, so a resumed conversation that dies before answering
@@ -71,6 +74,8 @@ async function runOnce(
   emit: (event: TurnEvent) => void,
   holdUntilContent: boolean,
 ): Promise<{ outcome: TurnOutcome; held: TurnEvent[] }> {
+  const now = deps.now ?? Date.now;
+  if (conversationId && deps.registry) deps.registry.begin(conversationId);
   const outcome: TurnOutcome = { text: "", thinking: "", toolCalls: [], conversationId };
   const held: TurnEvent[] = [];
   const toolFilter = req.tools && req.tools.length > 0 ? createToolTextFilter() : undefined;
@@ -86,64 +91,55 @@ async function runOnce(
     emit(event);
   };
 
-  await deps.driver.runTurn(
-    { requestId: req.requestId, prompt, mode, conversationId, attachments: attachmentsForRequest(req), signal: req.clientAbort },
-    (event) => {
-      if (event.type === "text_delta") {
-        if (toolFilter) {
-          const safe = toolFilter.append(event.text);
-          if (req.stream && safe.length > 0) {
-            streamedToolText += safe;
-            forward({ type: "text_delta", text: safe });
+  try {
+    await deps.driver.runTurn(
+      { requestId: req.requestId, prompt, mode, conversationId, attachments: attachmentsForRequest(req), signal: req.clientAbort },
+      (event) => {
+        if (event.type === "text_delta") {
+          if (toolFilter) {
+            const safe = toolFilter.append(event.text);
+            if (req.stream && safe.length > 0) {
+              streamedToolText += safe;
+              forward({ type: "text_delta", text: safe });
+            }
+          } else {
+            outcome.text += event.text;
+            forward(event);
           }
+        } else if (event.type === "thinking_delta") {
+          outcome.thinking += event.text;
+          forward(event);
+        } else if (event.type === "conversation") {
+          outcome.conversationId = event.conversationId;
+          forward(event);
+        } else if (event.type === "error") {
+          outcome.error = event;
+          forward(event);
+        } else if (event.type === "tool_call") {
+          outcome.toolCalls.push({ id: event.id, name: event.name, argumentsJson: event.argumentsJson });
+          forward(event);
+        } else if (toolFilter) {
+          const parsed = toolFilter.finish();
+          outcome.text = parsed.text;
+          outcome.toolCalls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
+          const finalText = req.stream ? parsed.unsentText : parsed.text;
+          if (finalText.length > 0) {
+            streamedToolText += finalText;
+            forward({ type: "text_delta", text: finalText });
+          }
+          for (const call of outcome.toolCalls) {
+            forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
+          }
+          forward({ type: "done", stopReason: outcome.toolCalls.length > 0 ? "tool_use" : "end_turn" });
         } else {
-          outcome.text += event.text;
           forward(event);
         }
-      } else if (event.type === "thinking_delta") {
-        outcome.thinking += event.text;
-        forward(event);
-      } else if (event.type === "conversation") {
-        outcome.conversationId = event.conversationId;
-        forward(event);
-      } else if (event.type === "error") {
-        outcome.error = event;
-        forward(event);
-      } else if (event.type === "tool_call") {
-        outcome.toolCalls.push({ id: event.id, name: event.name, argumentsJson: event.argumentsJson });
-        forward(event);
-      } else if (toolFilter) {
-        const parsed = toolFilter.finish();
-        outcome.text = parsed.text;
-        outcome.toolCalls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
-        const finalText = req.stream ? parsed.unsentText : parsed.text;
-        if (finalText.length > 0) {
-          streamedToolText += finalText;
-          forward({ type: "text_delta", text: finalText });
-        }
-        for (const call of outcome.toolCalls) {
-          forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
-        }
-        forward({ type: "done", stopReason: outcome.toolCalls.length > 0 ? "tool_use" : "end_turn" });
-      } else {
-        forward(event);
-      }
-    },
-  );
-  return { outcome, held };
-}
-
-function shouldRetryFresh(req: ChatRequest, outcome: TurnOutcome): boolean {
-  const error = outcome.error;
-  return (
-    error !== undefined &&
-    error.kind !== "rate_limit" &&
-    error.kind !== "auth" &&
-    outcome.text.length === 0 &&
-    outcome.thinking.length === 0 &&
-    outcome.toolCalls.length === 0 &&
-    !req.clientAbort.aborted
-  );
+      },
+    );
+    return { outcome, held };
+  } finally {
+    if (conversationId && deps.registry) deps.registry.end(conversationId, now());
+  }
 }
 
 export async function routeRequest(
@@ -155,6 +151,7 @@ export async function routeRequest(
   if (!model) throw new RouteError("model_not_found", `Unknown model "${req.model}"`);
   const mode = resolveMode(model, req.effort);
   const hasTools = Boolean(req.tools && req.tools.length > 0);
+  const role = threadRole(req, deps.primaryToolNames ?? DEFAULT_PRIMARY_TOOLS);
 
   const cacheEnabled = deps.config.cacheTtlSec > 0;
   const key = cacheKey(model.id, mode, req.maxTokens, req.messages, req.tools);
@@ -170,6 +167,7 @@ export async function routeRequest(
           cacheHit: true,
           warmThread: false,
           conversationId: cached.conversationId,
+          threadRole: role,
         },
       };
     }
@@ -178,8 +176,7 @@ export async function routeRequest(
   const sessionsEnabled = deps.config.sessionTtlSec > 0;
   const sessionFp = sessionsEnabled ? lookupFingerprint(req.conversationHint, req.messages, req.tools) : null;
   const found = sessionFp ? deps.sessions.find(sessionFp, now()) : undefined;
-  // A mode change mid-conversation starts a new Muse chat rather than flipping the old one.
-  const resume = found && found.mode === mode ? found : undefined;
+  const resume = pickResumeSession(found, mode, role, deps.registry);
 
   const release = await deps.slots.acquire(deps.config.queueTimeoutSec * 1000, req.clientAbort);
   if (!release) {
@@ -198,6 +195,7 @@ export async function routeRequest(
     cacheHit: false,
     warmThread: Boolean(warmThread),
     conversationId: resume?.conversationId,
+    threadRole: role,
   };
 
   if (warmThread) deps.warmPool?.check();
@@ -226,6 +224,9 @@ export async function routeRequest(
         finishedAt,
       );
     }
+    if (outcome.conversationId) {
+      registerTurnOutcome(deps, role, outcome.conversationId, finishedAt);
+    }
   };
 
   void (async () => {
@@ -238,7 +239,7 @@ export async function routeRequest(
             { requestId: req.requestId, conversationId: resume.conversationId, error: error.message },
             "Resumed Muse conversation failed before answering; retrying as a fresh chat",
           );
-          if (sessionFp) deps.sessions.delete(sessionFp);
+          retireOnRetryFresh(deps, resume.conversationId, sessionFp);
           meta.sessionReused = false;
           meta.conversationId = undefined;
           const second = await runOnce(deps, req, promptForRequest(req, false), mode, undefined, channel.emit, false);
@@ -263,6 +264,7 @@ export async function routeRequest(
             { requestId: req.requestId, conversationId: warmThread.conversationId, error: error.message },
             "Warm Muse conversation failed before answering; retrying as a fresh chat",
           );
+          retireOnRetryFresh(deps, warmThread.conversationId);
           const second = await runOnce(deps, req, promptForRequest(req, false), mode, undefined, channel.emit, false);
           finish(second.outcome, false);
         } else {

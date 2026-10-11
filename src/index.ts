@@ -13,6 +13,7 @@ import { runProbe } from "./muse/probe.js";
 import { deleteAllSideThreads } from "./muse/thread-cleanup.js";
 import { buildServer } from "./server.js";
 import { SessionStore } from "./sessions/session-store.js";
+import { ThreadRegistry } from "./sessions/thread-registry.js";
 import { JsonStore } from "./store/json-store.js";
 const SWEEP_INTERVAL_MS = 60 * 60_000;
 
@@ -41,8 +42,9 @@ async function serve(config: GatewayConfig): Promise<void> {
 
   const sessions = new SessionStore(resolve(config.dataDir, "sessions.json"));
   const cache = new ResponseCache(resolve(config.dataDir, "response-cache.json"));
+  const registry = new ThreadRegistry(resolve(config.dataDir, "threads.json"));
   const driver = createMuseDriver({ config, log });
-  const app = await buildServer({ config, apiKey: key, driver, sessions, cache, version: readVersion(), logger: log });
+  const app = await buildServer({ config, apiKey: key, driver, sessions, cache, registry, version: readVersion(), logger: log });
 
   const sweep = () => {
     const now = Date.now();
@@ -156,9 +158,9 @@ async function runCleanThreads(config: GatewayConfig, log: pino.Logger): Promise
 
   const sessions = new SessionStore(resolve(config.dataDir, "sessions.json"));
   const cache = new ResponseCache(resolve(config.dataDir, "response-cache.json"));
+  const registry = new ThreadRegistry(resolve(config.dataDir, "threads.json"));
   const warmPath = resolve(config.dataDir, "warm-threads.json");
   const warmStore = existsSync(warmPath) ? new JsonStore<unknown>(warmPath) : undefined;
-
   let page: Page | undefined;
   try {
     page = await browser.acquirePage();
@@ -170,6 +172,7 @@ async function runCleanThreads(config: GatewayConfig, log: pino.Logger): Promise
 
     sessions.clear();
     cache.clear();
+    registry.clear();
     if (warmStore) {
       warmStore.prune(() => false);
       warmStore.flush();

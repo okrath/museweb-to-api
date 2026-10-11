@@ -6,6 +6,7 @@ import { ResponseCache } from "../../src/cache/response-cache.js";
 import type { GatewayConfig } from "../../src/config.js";
 import { buildServer } from "../../src/server.js";
 import { SessionStore } from "../../src/sessions/session-store.js";
+import { ThreadRegistry } from "../../src/sessions/thread-registry.js";
 import { FakeDriver } from "./fake-driver.js";
 
 export interface TestGateway {
@@ -13,6 +14,7 @@ export interface TestGateway {
   driver: FakeDriver;
   sessions: SessionStore;
   cache: ResponseCache;
+  registry: ThreadRegistry;
   apiKey: string;
   dataDir: string;
   close: () => Promise<void>;
@@ -47,14 +49,16 @@ export async function startTestGateway(overrides?: Partial<GatewayConfig>): Prom
   const driver = new FakeDriver();
   const sessions = new SessionStore(join(dataDir, "sessions.json"));
   const cache = new ResponseCache(join(dataDir, "response-cache.json"));
+  const registry = new ThreadRegistry(join(dataDir, "threads.json"));
   const apiKey = "sk-mta-test";
-  const app = await buildServer({ config, apiKey, driver, sessions, cache, version: "test", logger: false });
+  const app = await buildServer({ config, apiKey, driver, sessions, cache, registry, version: "test", logger: false });
   await app.listen({ port: config.port, host: config.host });
   return {
     app,
     driver,
     sessions,
     cache,
+    registry,
     apiKey,
     dataDir,
     close: async () => {
