@@ -68,6 +68,8 @@ export const selectors = {
   ],
   /** Visible surfaces that may carry an error, quota or delivery message. */
   alerts: ['[role="alert"]', '[role="dialog"]', '[role="status"]', '[aria-live]'],
+  /** Sonner toasts, e.g. "Failed to delete side chat". Calibrated 2026-10-11. */
+  toast: ['[data-sonner-toast]'],
   /**
    * Side-chat panel. `/thread/new` never re-routes to the thread it creates, so after posting
    * the driver watches this panel for the new row (newest first, below "Main chat") and clicks it.
@@ -98,6 +100,8 @@ export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;
 export const threadDeleteItemPattern = /^delete$/i;
 /** Identifies the confirm dialog among other dialogs by its own text. */
 export const threadDeleteConfirmPattern = /delete/i;
+/** Toast Muse shows when it refuses a delete; a later retry usually succeeds. Seen 2026-10-11. */
+export const threadDeleteFailedPattern = /failed to delete/i;
 /**
  * The dock menu item that opens Settings. Its accessible text runs the "Ctrl+," shortcut hint
  * straight into the label with no separating whitespace, so this must not end on a `\b`.

@@ -33,7 +33,11 @@ time crosses a calibrated threshold.
 - Live: the log shows `snapshotMs` per turn; forcing a low threshold triggers one reload.
 
 ## Results
-- **Calibration pending**: Default `SLOW_SNAPSHOT_MS` set to 1500; live browser calibration could not be executed in this environment. Recalibration with a live omp run will record actual healthy read medians and update this default if necessary.
+- **Calibrated 2026-10-11** (two omp sessions with subagents through the gateway, headless Edge):
+  every turn's median `snapshotMs` was 3–4 ms on fresh and resumed threads of up to 8 turns.
+  3× that (about 12 ms) would trip on any GC pause, so the default is **250 ms**: about 60× a
+  healthy read, still well under the hundreds of milliseconds a very long thread takes. No reload
+  fired during the run. Revisit once a long-lived primary thread reports real growth.
 - Pure decision logic implemented in `src/muse/browser.ts`: `computeMedian` (median snapshot calculation), `noteTabSnapshot` (over-threshold evaluation and flagging), `consumeTabReload` (flag consumption and clearing on reload), `reloadSlowPage` (reload and composer wait).
 - In `src/muse/page-driver.ts`: each `snapshot()` call in `readReply` is timed, turn median `snapshotMs` is calculated and logged in `Muse turn completed`, and reported to `browser.noteSnapshotMs`.
 - In `src/muse/browser.ts`: `acquirePage` and `markBusy` reload flagged slow tabs before handing them out and log `snapshotMs`. The flag is cleared so each slow tab is reloaded only once.

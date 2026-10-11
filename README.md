@@ -257,7 +257,7 @@ See [`.env.example`](.env.example). The important knobs:
 | `PRIMARY_TOOL_NAMES` | `task,Task,Agent` | comma-separated delegation tool names; a request carrying one is a main agent and uses the primary side chat |
 | `SIDE_THREAD_IDLE_SEC` | `300` | a side chat idle this long after its last turn is deleted |
 | `MAX_SIDE_THREADS` | `10` | gateway-created side chats kept at most; the least recently used idle one is deleted first |
-| `SLOW_SNAPSHOT_MS` | `1500` | a tab whose page reads take longer than this (median over a turn) is reloaded before its next turn |
+| `SLOW_SNAPSHOT_MS` | `250` | a tab whose page reads take longer than this (median over a turn) is reloaded before its next turn; a healthy short thread reads in about 3–4 ms |
 | `LOG_LEVEL` | `info` | `debug` adds one `Chat request traffic` line per chat request: client headers (transport headers and any header whose name contains auth, token, key, secret, cookie or password are dropped), short hashes of the system prompt, tool set, conversation hint and first user message, the tool names, and the first 100 characters of the system prompt. Use it to see how a client's main agent and its subagents differ |
 
 ## Errors

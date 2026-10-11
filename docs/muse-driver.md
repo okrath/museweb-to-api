@@ -24,8 +24,14 @@ selector keep the driver limping (and the probe report useful) when Muse renames
   button. The panel is virtualised beyond roughly 50 rows, and rows expose no `href`, so a row
   cannot be found by URL. `deleteThreadAt` (`thread-cleanup.ts`) therefore opens the thread's
   own URL and acts on the row Muse marks as open (`threadActiveRow`, `aria-current="page"`), then
-  reloads the URL: the thread is gone when Muse redirects away or no row is marked open.
-  Titles are never compared, because they are not unique (verified 2026-10-11).
+  reloads the URL: the thread is gone when Muse redirects away or no row is marked open. A
+  deleted thread's URL still opens, just with no row marked open, so a thread that is already
+  gone counts as deleted (as long as the panel shows other rows). Titles are never compared,
+  because they are not unique (verified 2026-10-11).
+- **Muse can refuse a delete**: the dialog closes, the row stays, and a sonner toast
+  (`toast`, `[data-sonner-toast]`) says "Failed to delete side chat". Seen 2026-10-11 on both
+  fresh and hours-old chats after several deletes in a row; the same chats deleted fine minutes
+  later. The driver reports the toast text and the reaper retries with backoff.
 - **Messages**: `[data-message-item]` with `data-message-role="user|assistant"` and a stable
   `data-message-id`. The assistant bubble is `[data-hatch-assistant-message-body]`; the rendered
   Markdown sits in a `.prose` container inside it. User items carry an sr-only "You:" label and,
@@ -156,7 +162,7 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | Attachment sent but Muse never appears to receive the file, with no error | `attachmentPreview` did not match anything real, so the driver only logged a warning and sent early; tighten it from a probe run taken right after attaching |
 | Follow-ups never reuse the chat (`x-mta-session-reused: 0`) | the URL stayed on `/thread/new` after the reply; check `turn.trace[*].snapshot.url` and `conversationIdFromUrl` |
 | `504 Muse did not create a side chat … in time` while the reply is visible in the Muse UI | the panel changed in a way the driver did not recognise; compare the `threadRow` texts in `trace` before and after, and check `threadPanel`/`threadRow` selectors |
-| Side chats keep growing past `MAX_SIDE_THREADS`, or the reaper keeps logging failed deletions | `threadActiveRow` (the open thread's row must carry `aria-current="page"`), `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`; a failed deletion stays in `threads.json` and is retried with backoff, it never fails a turn |
+| Side chats keep growing past `MAX_SIDE_THREADS`, or the reaper keeps logging failed deletions | a `Muse refused to delete … "Failed to delete side chat"` message is Muse's own refusal and clears with time; otherwise check `threadActiveRow` (the open thread's row must carry `aria-current="page"`), `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`; a failed deletion stays in `threads.json` and is retried with backoff, it never fails a turn |
 | Timeout with `Delivery not confirmed` and many short-lived sockets | Muse's VM rejected the message; see the note below |
 | Muse answers in prose, or offers to connect a device / access files directly, on a later turn of a tool-using conversation | the resumed-turn reminder is missing or too weak; see "Keeping the function-call protocol alive on resumed turns" and `renderToolReminder` in `src/prompt/tool-protocol.ts` |
 

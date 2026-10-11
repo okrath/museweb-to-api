@@ -38,7 +38,7 @@ const configSchema = z.object({
   PRIMARY_TOOL_NAMES: z.string().default("task,Task,Agent"),
   SIDE_THREAD_IDLE_SEC: z.coerce.number().int().min(1).default(300),
   MAX_SIDE_THREADS: z.coerce.number().int().min(1).default(10),
-  SLOW_SNAPSHOT_MS: z.coerce.number().int().min(1).default(1500),
+  SLOW_SNAPSHOT_MS: z.coerce.number().int().min(1).default(250),
 });
 
 export interface GatewayConfig {

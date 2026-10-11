@@ -1,12 +1,14 @@
 import type { Locator, Page } from "playwright";
 import type { CleanThreadsResult } from "../core/types.js";
 import { threadRowsScript, type ThreadRow } from "./page-scripts.js";
-import { conversationIdFromUrl, mainChatRowPattern, selectors, threadDeleteItemPattern } from "./selectors.js";
+import { conversationIdFromUrl, mainChatRowPattern, selectors, threadDeleteFailedPattern, threadDeleteItemPattern } from "./selectors.js";
 
 const HOVER_RETRIES = 10;
 const HOVER_RETRY_MS = 400;
 const AFTER_DELETE_WAIT_MS = 700;
 const ACTIVE_ROW_SETTLE_MS = 3_000;
+const ROW_DROP_WAIT_MS = 5_000;
+const NETWORK_SETTLE_MS = 3_000;
 
 async function sideRows(page: Page): Promise<ThreadRow[]> {
   const rows = await page.evaluate(threadRowsScript, { row: selectors.threadRow });
@@ -122,9 +124,6 @@ export async function deleteThreadAt(
   const museUrl = new URL(url).origin;
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await waitForComposerFn(page, museUrl);
-  // Muse redirects away from a thread that no longer exists (deleted by hand or by
-  // clean-threads); that is the end state we want, so it counts as deleted. A missing active row
-  // on the thread's own URL still throws, so a broken selector never passes for a deletion.
   if (conversationIdFromUrl(page.url(), museUrl) !== conversationIdFromUrl(url, museUrl)) return;
   await ensureThreadPanelOpen(page);
 
@@ -132,6 +131,10 @@ export async function deleteThreadAt(
   await activeRow.waitFor({ state: "attached", timeout: 5000 }).catch(() => undefined);
   const count = await page.locator(selectors.threadActiveRow.join(",")).count().catch(() => 0);
   if (count === 0) {
+    // A deleted thread's URL still opens, with no panel row marked open (seen live 2026-10-11):
+    // that is the end state we want. With no side rows at all the selectors may be broken, so
+    // that still throws rather than passing for a deletion.
+    if ((await sideRows(page)).length > 0) return;
     throw new Error(`Active thread row not found in side panel for ${url}`);
   }
 
@@ -163,13 +166,27 @@ export async function deleteThreadAt(
   if (!hasConfirm) {
     throw new Error(`Delete confirmation dialog button not found for active thread at ${url}`);
   }
+  const rowsBefore = (await sideRows(page)).length;
   await confirmButton.click();
 
-  // Wait for confirm dialog to close or active row to detach
-  await Promise.race([
-    confirmDialog.waitFor({ state: "hidden", timeout: 4000 }).catch(() => undefined),
-    activeRow.waitFor({ state: "detached", timeout: 4000 }).catch(() => undefined),
-  ]);
+  // Muse sometimes refuses a delete and only says so in a "Failed to delete side chat" toast (seen
+  // live 2026-10-11 on fresh and hours-old chats alike; the same chats deleted fine minutes later),
+  // so wait for the panel to drop the row and report the toast otherwise; the reaper retries with
+  // backoff.
+  const refusal = page.locator(selectors.toast.join(",")).filter({ hasText: threadDeleteFailedPattern }).first();
+  const deadline = Date.now() + ROW_DROP_WAIT_MS;
+  while (Date.now() < deadline) {
+    if ((await sideRows(page)).length < rowsBefore) break;
+    // The toast only stays a few seconds, so look for it while waiting.
+    if (await refusal.isVisible().catch(() => false)) {
+      const text = (await refusal.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+      throw new Error(`Muse refused to delete ${url}: "${text}"`);
+    }
+    await page.waitForTimeout(250);
+  }
+  if ((await sideRows(page)).length >= rowsBefore) throw new Error(`Muse kept the thread at ${url}`);
+  // Navigating away before the delete request finishes would cancel it.
+  await page.waitForLoadState("networkidle", { timeout: NETWORK_SETTLE_MS }).catch(() => undefined);
 
   // Reload the thread URL. Success only when the page no longer shows that thread.
   await page.goto(url, { waitUntil: "domcontentloaded" });

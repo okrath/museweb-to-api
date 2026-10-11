@@ -79,7 +79,7 @@ export class MuseBrowser {
   private readonly slowSnapshotMs: number;
 
   constructor(private readonly options: MuseBrowserOptions) {
-    this.slowSnapshotMs = options.slowSnapshotMs ?? 1500;
+    this.slowSnapshotMs = options.slowSnapshotMs ?? 250;
   }
 
   get isOpen(): boolean {
