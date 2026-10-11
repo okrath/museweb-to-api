@@ -107,11 +107,12 @@ page heavy, a reload resets it).
 browser slot when one is free (`acquire(0)`), so it never delays a request, and deletes one chat
 at a time with `driver.deleteThread` (see "Deleting a side chat" in `docs/muse-driver.md`):
 retired chats (old primaries, chats abandoned by a fresh retry, expired warm chats), side chats
-idle for `SIDE_THREAD_IDLE_SEC`, and the least recently used idle side chats beyond
-`MAX_SIDE_THREADS`. A chat with a turn in flight is never chosen; in-flight counts reset on
-restart. A confirmed deletion removes the registry row and every session row pointing at the
-chat; a failed one backs off (60 s per attempt, at most 10 minutes). Only chats in the registry
-are ever deleted.
+idle for `SIDE_THREAD_IDLE_SEC` (a failed turn that still created a chat records it as side),
+and the least recently used idle side chats beyond `MAX_SIDE_THREADS`. A chat with a turn in
+flight is never chosen; in-flight counts reset on restart. Session rows pointing at the chat are
+dropped before deleting it, so no request resumes a chat mid-deletion. A confirmed deletion, or a
+chat Muse already redirects away from, removes the registry row; a failed one backs off (60 s per
+attempt, at most 10 minutes). Only chats in the registry are ever deleted.
 
 ## Storage
 
