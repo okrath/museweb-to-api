@@ -21,14 +21,18 @@ export function createRequestId(request: FastifyRequest): string {
   return `req_${request.id.replace(/-/g, "").slice(0, 21)}`;
 }
 
-function wireClientAbort(request: FastifyRequest): AbortController {
+function wireClientAbort(request: FastifyRequest, reply: FastifyReply): AbortController {
   const controller = new AbortController();
   const abort = () => {
     if (!controller.signal.aborted) controller.abort();
   };
+  const socket = request.socket;
   request.raw.on("close", abort);
-  request.socket?.on("close", abort);
-  if (request.socket?.destroyed) abort();
+  socket?.on("close", abort);
+  // A keep-alive socket outlives the request; detach once the response closes so listeners do
+  // not pile up one per request.
+  reply.raw.once("close", () => socket?.off("close", abort));
+  if (socket?.destroyed) abort();
   return controller;
 }
 
@@ -47,7 +51,7 @@ export function metaHeaders(meta: RouteMeta): Record<string, string> {
 export function wrapNormalize(normalize: (input: NormalizeInput) => ChatRequest) {
   return (request: FastifyRequest, reply: FastifyReply, body: unknown): ChatRequest | undefined => {
     try {
-      const controller = wireClientAbort(request);
+      const controller = wireClientAbort(request, reply);
       const requestId = createRequestId(request);
       request.chatRequestId = requestId;
       return normalize({ body, headers: request.headers, requestId, clientAbort: controller.signal });
