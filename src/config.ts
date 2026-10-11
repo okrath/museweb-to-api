@@ -35,6 +35,9 @@ const configSchema = z.object({
   SESSION_TTL_SEC: z.coerce.number().int().min(0).default(86_400),
   CACHE_TTL_SEC: z.coerce.number().int().min(0).default(300),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  PRIMARY_TOOL_NAMES: z.string().default("task,Task,Agent"),
+  SIDE_THREAD_IDLE_SEC: z.coerce.number().int().min(1).default(300),
+  MAX_SIDE_THREADS: z.coerce.number().int().min(1).default(10),
 });
 
 export interface GatewayConfig {
@@ -53,6 +56,9 @@ export interface GatewayConfig {
   sessionTtlSec: number;
   cacheTtlSec: number;
   logLevel: string;
+  primaryToolNames: string[];
+  sideThreadIdleSec: number;
+  maxSideThreads: number;
 }
 
 export function loadConfig(options?: { envFile?: string | false; env?: NodeJS.ProcessEnv }): GatewayConfig {
@@ -84,5 +90,10 @@ export function loadConfig(options?: { envFile?: string | false; env?: NodeJS.Pr
     sessionTtlSec: env.SESSION_TTL_SEC,
     cacheTtlSec: env.CACHE_TTL_SEC,
     logLevel: env.LOG_LEVEL,
+    primaryToolNames: env.PRIMARY_TOOL_NAMES.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    sideThreadIdleSec: env.SIDE_THREAD_IDLE_SEC,
+    maxSideThreads: env.MAX_SIDE_THREADS,
   };
 }

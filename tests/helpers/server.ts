@@ -33,6 +33,9 @@ export function testConfig(dataDir: string, overrides?: Partial<GatewayConfig>):
     sessionTtlSec: 3600,
     cacheTtlSec: 300,
     logLevel: "silent",
+    primaryToolNames: ["task", "Task", "Agent"],
+    sideThreadIdleSec: 300,
+    maxSideThreads: 10,
     ...overrides,
   };
 }

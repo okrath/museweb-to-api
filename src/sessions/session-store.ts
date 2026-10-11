@@ -84,6 +84,11 @@ export class SessionStore {
     this.store.delete(fp);
   }
 
+  /** Removes every session belonging to this conversation; returns how many were removed. */
+  deleteByConversation(conversationId: string): number {
+    return this.store.prune((row) => row.conversationId !== conversationId);
+  }
+
   pruneExpired(now: number): number {
     return this.store.prune((row) => row.expiresAt > now);
   }
