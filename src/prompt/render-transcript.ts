@@ -4,13 +4,13 @@ import { renderToolReminder, renderToolResultBlocks, renderToolResults } from ".
 export interface TranscriptOptions {
   resume?: boolean;
   toolProtocol?: string;
-  /** Resumed turn still expects function-call replies; see `renderToolReminder`. */
-  toolsActive?: boolean;
+  /** Functions a resumed turn still expects calls to; see `renderToolReminder`. */
+  activeTools?: Array<{ name: string }>;
 }
 
-function renderResumedTranscript(messages: ChatMessage[], toolsActive: boolean): string {
+function renderResumedTranscript(messages: ChatMessage[], activeTools: Array<{ name: string }>): string {
   const conversation = messages.filter((message) => message.role !== "system");
-  const withReminder = (text: string) => (toolsActive ? `${renderToolReminder()}\n\n${text}` : text);
+  const withReminder = (text: string) => (activeTools.length > 0 ? `${renderToolReminder(activeTools)}\n\n${text}` : text);
 
   const lastToolIndex = conversation.map((message) => message.role).lastIndexOf("tool");
   if (lastToolIndex >= 0) {
@@ -87,7 +87,7 @@ export function renderTranscript(messages: ChatMessage[], opts?: TranscriptOptio
     conversation = messages.slice(1);
   }
 
-  if (opts?.resume) return renderResumedTranscript(messages, opts.toolsActive ?? false);
+  if (opts?.resume) return renderResumedTranscript(messages, opts.activeTools ?? []);
 
   const prompt = renderFullTranscript(conversation);
   const protocolPrompt = opts?.toolProtocol ? `${opts.toolProtocol}\n\n${prompt}` : prompt;

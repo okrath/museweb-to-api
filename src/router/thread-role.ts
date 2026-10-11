@@ -89,7 +89,7 @@ export function attachmentsForRequest(req: ChatRequest): Attachment[] | undefine
 export function promptForRequest(req: ChatRequest, resume: boolean): string {
   const hasTools = Boolean(req.tools && req.tools.length > 0) && req.toolChoice !== "none";
   const toolProtocol = !resume && hasTools ? renderToolProtocol(req.tools!, req.toolChoice) : undefined;
-  return renderTranscript(req.messages, { resume, toolProtocol, toolsActive: resume && hasTools });
+  return renderTranscript(req.messages, { resume, toolProtocol, activeTools: resume && hasTools ? req.tools : undefined });
 }
 
 export function retireOnRetryFresh(

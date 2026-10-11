@@ -10,8 +10,10 @@ const tools = [
 describe("tool prompt protocol", () => {
   it("renders every function, schema and choice contract without forbidden framing", () => {
     const prompt = renderToolProtocol(tools, "required");
-    expect(prompt).toContain("read_file(arguments schema)");
-    expect(prompt).toContain("write_file(arguments schema)");
+    expect(prompt).toContain("exactly these 2 functions: `read_file`, `write_file`.");
+    expect(prompt).toContain('<function name="read_file">');
+    expect(prompt).toContain('<function name="write_file">');
+    expect(prompt.match(/^<\/function>$/gm)).toHaveLength(2);
     expect(prompt).toContain("JSON Schema");
     expect(prompt).toContain('{"name": "...", "arguments": {...}}');
     expect(prompt).toContain("Your reply must request at least one function.");

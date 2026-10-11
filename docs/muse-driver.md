@@ -29,9 +29,10 @@ selector keep the driver limping (and the probe report useful) when Muse renames
   gone counts as deleted (as long as the panel shows other rows). Titles are never compared,
   because they are not unique (verified 2026-10-11).
 - **Muse can refuse a delete**: the dialog closes, the row stays, and a sonner toast
-  (`toast`, `[data-sonner-toast]`) says "Failed to delete side chat". Seen 2026-10-11 on both
-  fresh and hours-old chats after several deletes in a row; the same chats deleted fine minutes
-  later. The driver reports the toast text and the reaper retries with backoff.
+  (`toast`, `[data-sonner-toast]`) says "Failed to delete side chat". Seen from 2026-10-11 on
+  fresh and hours-old chats alike, and the same chats stayed refused for hours. The driver throws
+  `ThreadDeleteRefusedError` with the toast text, and the reaper stops tracking that chat
+  instead of retrying it.
 - **Messages**: `[data-message-item]` with `data-message-role="user|assistant"` and a stable
   `data-message-id`. The assistant bubble is `[data-hatch-assistant-message-body]`; the rendered
   Markdown sits in a `.prose` container inside it. User items carry an sr-only "You:" label and,
@@ -98,9 +99,10 @@ the sent history, e.g. because the client pruned an old function round out of co
 Muse as bare text. Muse then drifted back to its own persona instead of requesting a function —
 in one observed case, offering to connect a device to read a file directly rather than calling
 `read_file`. `renderToolReminder` (`src/prompt/tool-protocol.ts`) is a short restatement of the
-two rules that matter (decide the next function, reply with a fenced json block; never look
-anything up or act on your own). `route-request.ts#promptForRequest` passes `toolsActive` whenever
-a resumed turn still has `req.tools` (and `toolChoice !== "none"`), and `renderResumedTranscript`
+rules that matter (decide the next function, reply with a fenced json block; never look anything
+up or act on your own; saying something was delegated does nothing without its block) plus the
+function names. `thread-role.ts#promptForRequest` passes `activeTools` whenever a resumed turn
+still has `req.tools` (and `toolChoice !== "none"`), and `renderResumedTranscript`
 prepends the reminder to every return path except the one that already appends its own
 `Continue: ...` line after a function result. Confirmed live 2026-09-22: the same resumed,
 tool-message-free follow-up got a plain-prose reply before this and a correct `tool_calls` reply
@@ -162,7 +164,7 @@ screenshots (`01-loaded.png`, `..-submitted.png`, one per 5 s of polling, `..-fi
 | Attachment sent but Muse never appears to receive the file, with no error | `attachmentPreview` did not match anything real, so the driver only logged a warning and sent early; tighten it from a probe run taken right after attaching |
 | Follow-ups never reuse the chat (`x-mta-session-reused: 0`) | the URL stayed on `/thread/new` after the reply; check `turn.trace[*].snapshot.url` and `conversationIdFromUrl` |
 | `504 Muse did not create a side chat … in time` while the reply is visible in the Muse UI | the panel changed in a way the driver did not recognise; compare the `threadRow` texts in `trace` before and after, and check `threadPanel`/`threadRow` selectors |
-| Side chats keep growing past `MAX_SIDE_THREADS`, or the reaper keeps logging failed deletions | a `Muse refused to delete … "Failed to delete side chat"` message is Muse's own refusal and clears with time; otherwise check `threadActiveRow` (the open thread's row must carry `aria-current="page"`), `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`; a failed deletion stays in `threads.json` and is retried with backoff, it never fails a turn |
+| Side chats keep growing past `MAX_SIDE_THREADS`, or the reaper keeps logging failed deletions | a `Muse refused to delete thread; no longer tracking it` line is Muse's own refusal: the chat stays in Muse and is no longer counted; otherwise check `threadActiveRow` (the open thread's row must carry `aria-current="page"`), `threadRowMenuButton`/`threadDeleteConfirmDialog` in `selectors.ts`, or the `Delete` wording matched by `threadDeleteItemPattern`; any other failed deletion stays in `threads.json` and is retried with backoff, it never fails a turn |
 | Timeout with `Delivery not confirmed` and many short-lived sockets | Muse's VM rejected the message; see the note below |
 | Muse answers in prose, or offers to connect a device / access files directly, on a later turn of a tool-using conversation | the resumed-turn reminder is missing or too weak; see "Keeping the function-call protocol alive on resumed turns" and `renderToolReminder` in `src/prompt/tool-protocol.ts` |
 

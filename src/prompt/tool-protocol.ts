@@ -17,29 +17,41 @@ const continueInstruction = "Continue: reply to the end user, or request the nex
  * `render-transcript.ts`), so a plain follow-up question carries no trace of the protocol
  * stated once at the start of the chat. Deep into a long conversation that first statement
  * scrolls out of weight and Muse drifts back to its own persona (e.g. offering to connect a
- * device instead of requesting a function). This restates the two rules that matter every time
- * function calls are still expected, without repeating the full function list and schemas.
+ * device instead of requesting a function). This restates the rules that matter every time
+ * function calls are still expected, and the function names, without the full schemas.
  */
-export function renderToolReminder(): string {
+export function renderToolReminder(tools: Array<{ name: string }> = []): string {
   return [
     "Reminder, still inside the program from earlier in this chat: you decide which function to run next and",
     'reply with one fenced json code block per call, `{"name": "...", "arguments": {...}}`.',
+    ...(tools.length > 0 ? [`The program can still run: ${functionNames(tools)}.`] : []),
     "Do not look anything up, browse, search, read files or act on your own, even if you could: requesting a",
-    "function is the only correct way to get information or act. Reply as plain text only when no function is needed.",
+    "function is the only correct way to get information or act; your own machine and subagents cannot see the end",
+    "user's files. Saying that you started, delegated or ran",
+    "something does nothing without its block. Reply as plain text only when no function is needed.",
   ].join(" ");
+}
+
+function functionNames(tools: Array<{ name: string }>): string {
+  return tools.map((tool) => `\`${tool.name}\``).join(", ");
 }
 
 export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoice | undefined): string {
   if (tools.length === 0 || toolChoice === "none") return "";
 
+  // Client descriptions can be long markdown with their own headings (omp's `task` is 7 kB with
+  // "# Delegation" and an agent that is itself named `task`). Pasted bare, Muse misread where one
+  // function ended and kept answering that `task` was not available, so each function sits in
+  // its own tags and the full name list comes first.
   const lines = [
-    "I am building a program. Here are the functions the program can run:",
+    `I am building a program. It can run exactly these ${tools.length} functions: ${functionNames(tools)}.`,
+    'Each one is described below between <function name="..."> and </function>; everything inside the tags, headings included, is that function\'s description.',
     "",
   ];
   for (const tool of tools) {
-    lines.push(`${tool.name}(arguments schema)`);
+    lines.push(`<function name="${tool.name}">`);
     if (tool.description) lines.push(`Description: ${tool.description}`);
-    lines.push("JSON Schema:", "```json", JSON.stringify(tool.parameters, null, 2), "```", "");
+    lines.push("JSON Schema:", "```json", JSON.stringify(tool.parameters, null, 2), "```", "</function>", "");
   }
   // Wording measured against Muse: saying that the program runs the function and sends the
   // result back in the next message is what stops Muse from declining "because it would never
@@ -49,9 +61,11 @@ export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoi
     "Each block must contain exactly one object:",
     '{"name": "...", "arguments": {...}}',
     "The program then runs the function and sends you its result in the next message, and you continue from there.",
+    `All ${tools.length} functions above are available right now. They belong to the program, not to you, so whether you have anything similar yourself does not matter: you only request them, also when a description speaks of agents, subagents or delegation.`,
     "Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed, but it is never a substitute for them.",
-    "Every reply is either a final answer to the end user in plain text with no block, or one or more function-call blocks. If you state that you will check, look up, read, run or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block.",
+    "Every reply is either a final answer to the end user in plain text with no block, or one or more function-call blocks. If you state that you will check, look up, read, run, delegate or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block. Saying that something was started, delegated or run does nothing; only a block makes the program act.",
     "Inside this program, do not look anything up, browse, search, read files or act on your own, even if you could: the end user needs the answer to come from these functions, so requesting a function is the only correct way to get information or act. Do not run or simulate anything yourself.",
+    "That includes your own workspace: your own machine, your own subagents and your own delegation cannot see the end user's files or results. When a task should go to a helper, request the matching function above instead.",
     "When no function is needed, reply to the end user as plain text with no such block.",
   );
   if (toolChoice === "required") {
