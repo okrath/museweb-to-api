@@ -43,6 +43,7 @@ export function metaHeaders(meta: RouteMeta): Record<string, string> {
     "x-mta-session-reused": meta.sessionReused ? "1" : "0",
     "x-mta-cache-hit": meta.cacheHit ? "1" : "0",
     "x-mta-warm-thread": meta.warmThread ? "1" : "0",
+    "x-mta-thread-role": meta.threadRole,
   };
   if (meta.conversationId) headers["x-mta-conversation-id"] = meta.conversationId;
   return headers;
