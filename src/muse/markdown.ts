@@ -22,8 +22,8 @@ turndown.addRule("fencedCodeWithLanguage", {
   filter: (node) => node.nodeName === "PRE" && node.firstElementChild?.nodeName === "CODE",
   replacement: (_content, node) => {
     const code = (node as HTMLElement).firstElementChild as HTMLElement;
-    const className = code.getAttribute("class") ?? "";
-    const language = /language-([\w+-]+)/.exec(className)?.[1] ?? "";
+    const classNames = `${code.getAttribute("class") ?? ""} ${(node as HTMLElement).getAttribute("class") ?? ""}`;
+    const language = /language-([\w+-]+)/.exec(classNames)?.[1] ?? "";
     const text = codeText(code);
     return `\n\n\`\`\`${language}\n${text.replace(/\n$/, "")}\n\`\`\`\n\n`;
   },
@@ -45,12 +45,11 @@ turndown.addRule("compactListItem", {
 
 /** Code text with its line breaks, also when every line is its own element without a "\n". */
 function codeText(code: HTMLElement): string {
-  const lines = Array.from(code.children);
-  const lineElements =
-    lines.length > 0 &&
-    lines.length === code.childNodes.length &&
-    lines.every((line) => line.nodeName === "SPAN" && (line.getAttribute("class") ?? "").split(/\s+/).includes(codeLineClass));
-  return lineElements ? lines.map((line) => line.textContent ?? "").join("\n") :(code.textContent ?? "");
+  const lines = Array.from(code.childNodes).filter((node) => node.nodeType !== 3 || node.textContent?.trim());
+  const isLine = (node: ChildNode) =>
+    node.nodeName === "SPAN" && ((node as HTMLElement).getAttribute("class") ?? "").split(/\s+/).includes(codeLineClass);
+  if (lines.length === 0 || !lines.every(isLine)) return code.textContent ?? "";
+  return lines.map((line) => line.textContent ?? "").join("\n");
 }
 
 export function htmlToMarkdown(html: string): string {

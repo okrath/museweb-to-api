@@ -26,8 +26,11 @@ export const selectors = {
   assistantMessage: ['[data-message-item][data-message-role="assistant"]', '[data-hatch-assistant-message-body]'],
   /** User message items, used to confirm the prompt was posted and to spot delivery failures. */
   userMessage: ['[data-message-item][data-message-role="user"]'],
-  /** Removed from the reply subtree before it is converted to Markdown. */
-  strip: ['button', 'svg', '[role="toolbar"]', '[aria-live]', '.sr-only'],
+  /**
+   * Removed from the reply subtree before it is converted to Markdown. The code-block header only
+   * repeats the language (also on the `<pre>` class) and would become a stray paragraph. Seen 2026-10-12.
+   */
+  strip: ['button', 'svg', '[role="toolbar"]', '[aria-live]', '.sr-only', '[data-streamdown="code-block-header"]'],
   /** Page chrome that can change during a turn but is never the reply. */
   ignore: [
     'nav',
@@ -99,6 +102,7 @@ export const selectors = {
  * `<code>`, with no newline text between them. Seen 2026-10-12.
  */
 export const codeLineClass = "block";
+
 export const mainChatRowPattern = /^main chat\b/i;
 export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;
 /** Matches both the "Delete" menu item and the "Delete" button inside its confirm dialog. */

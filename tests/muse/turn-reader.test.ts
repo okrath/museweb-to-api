@@ -77,7 +77,8 @@ describe("htmlToMarkdown", () => {
   it("keeps line breaks when each code line is its own block span", () => {
     const line = (text: string) => `<span class="block before:inline-block"><span>${text}</span></span>`;
     const html = `<pre class="language-bash"><code class="[counter-reset:line]">${line("git log")}${line("")}${line("echo  done")}</code></pre>`;
-    expect(htmlToMarkdown(html)).toBe("```\ngit log\n\necho  done\n```");
+    expect(htmlToMarkdown(html)).toBe("```bash\ngit log\n\necho  done\n```");
+    expect(htmlToMarkdown(`<pre><code>${line("a")}\n${line("b")}</code></pre>`)).toBe("```\na\nb\n```");
   });
 });
 
