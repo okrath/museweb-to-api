@@ -77,6 +77,9 @@ export async function executeTurn(
       await submit(page, composer, snapshot, ctx);
       trace?.({ at: Date.now(), stage: "submitted" });
       const where = await resolveCreatedThread(page, ctx, rowsBefore, snapshot, timings.firstTokenTimeoutMs, trace);
+      // Claimed before reading, so a reply that fails or times out still never lends this chat to another turn.
+      const routed = conversationIdFromUrl(page.url(), ctx.config.museUrl);
+      if (routed) claimedThreads.add(routed);
       const reply = await readReply(page, ctx, input, snapshot, emit, timings, trace);
       // Muse sometimes re-routes the draft page to the created thread on its own; only fall back
       // to the panel when the URL still says `/thread/new`.

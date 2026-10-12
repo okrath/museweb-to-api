@@ -3,6 +3,7 @@ import type { Page } from "playwright";
 import type { GatewayConfig } from "../config.js";
 import type { DriverStatus, MuseDriver, TurnEvent, TurnInput, UsageOutcome } from "../core/types.js";
 import { MuseBrowser } from "./browser.js";
+import { claimedThreads } from "./new-thread.js";
 import { type DriverContext, toTurnError, type TurnTrace, waitForComposer } from "./page-context.js";
 import { domReportScript, type DomReport } from "./page-scripts.js";
 import { conversationIdFromUrl, selectors } from "./selectors.js";
@@ -130,7 +131,10 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
           await page.goto(config.museUrl, { waitUntil: "domcontentloaded" });
         }
         await waitForComposer(page, config.museUrl, 20_000).catch(() => undefined);
-        return await deleteAllSideThreads(page, onProgress);
+        const result = await deleteAllSideThreads(page, onProgress);
+        // It removes every side chat and reports titles, not URLs, so forget them all.
+        claimedThreads.clear();
+        return result;
       } finally {
         if (page) await page.close().catch(() => undefined);
       }
@@ -142,6 +146,7 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
       try {
         page = await browser.acquirePage();
         await deleteThreadAt(page, threadUrl, waitForComposer);
+        claimedThreads.delete(threadUrl);
       } finally {
         if (page) browser.releasePage(page);
       }

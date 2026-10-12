@@ -14,6 +14,7 @@ const THREAD_ROW_CANDIDATES = 3;
 /**
  * Side chats this process has created or continued. None of them is ever a thread a new prompt
  * just created, even when it holds an identical prompt (every warm-up sends the same one).
+ * A deleted chat leaves the panel, so deleting one drops it from this set.
  */
 export const claimedThreads = new Set<string>();
 
@@ -90,7 +91,10 @@ async function openRowWithPrompt(
     trace?.({ at: Date.now(), stage: "thread_opened", note: `${page.url()} attempt=${attempt + 1}`, snapshot: snap });
     // Every message is unseen in a freshly opened thread, so `promptPosted` would accept any of
     // them; only a message that holds this prompt's head and tail proves the thread is ours.
-    if (snap.promptEchoed) return landed;
+    if (snap.promptEchoed) {
+      claimedThreads.add(landed);
+      return landed;
+    }
     // A transcript that rendered other messages but not ours is simply the wrong thread.
     if (snap.candidates > 0 || snap.freshRoots > 0) return undefined;
   }
