@@ -52,7 +52,8 @@ Fastify gateway (src/server.ts)
 6. **Turn.** `router/route-request.ts` runs `driver.runTurn` and bridges its callback events into
    an async iterable (`router/event-channel.ts`). When functions are active, the router holds text
    from the first possible fenced block (including the observed detached `json` line), parses
-   the complete Markdown at `done`, and emits cleaned text, function-call events, and a
+   the complete Markdown at `done` (tools are shown to Muse as `POST /api/<tool name>` endpoints
+   and `prompt/tool-protocol.ts#toolName` maps a request back), and emits cleaned text, function-call events, and a
    `tool_use` stop reason. A resumed turn, or a turn using a warm side chat, is held back until
    its first content delta; if it fails before that (for example the Muse
    chat no longer opens) the router deletes the dead session or warm entry and reruns the request

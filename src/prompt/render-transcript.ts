@@ -1,10 +1,10 @@
 import type { ChatMessage } from "../core/types.js";
-import { renderToolReminder, renderToolResultBlocks, renderToolResults } from "./tool-protocol.js";
+import { endpointOf, renderToolReminder, renderToolResultBlocks, renderToolResults } from "./tool-protocol.js";
 
 export interface TranscriptOptions {
   resume?: boolean;
   toolProtocol?: string;
-  /** Functions a resumed turn still expects calls to; see `renderToolReminder`. */
+  /** Tools a resumed turn still expects requests to; see `renderToolReminder`. */
   activeTools?: Array<{ name: string }>;
 }
 
@@ -64,7 +64,7 @@ function renderFullTranscript(conversation: ChatMessage[]): string {
     if (message.content.length > 0) lines.push(message.content);
     if (message.role === "assistant") {
       for (const call of message.toolCalls ?? []) {
-        lines.push(`[function requested: ${call.name} (call ${call.id})]`, call.argumentsJson);
+        lines.push(`[request sent: POST ${endpointOf(call.name)} (request ${call.id})]`, call.argumentsJson);
       }
     }
   }

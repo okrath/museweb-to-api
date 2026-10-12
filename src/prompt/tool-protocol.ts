@@ -10,68 +10,73 @@ export interface ParsedToolMarkdown {
   calls: ParsedToolCall[];
 }
 
-const continueInstruction = "Continue: reply to the end user, or request the next function in the same json format.";
+const continueInstruction = "Continue: reply to the end user, or send the next request in the same json format.";
+
+/** Every client tool is shown to Muse as `POST /api/<tool name>`; `toolName` strips it again. */
+export function endpointOf(name: string): string {
+  return `/api/${name}`;
+}
 
 /**
  * A resumed Muse conversation sends only the new message, never the whole transcript (see
  * `render-transcript.ts`), so a plain follow-up question carries no trace of the protocol
  * stated once at the start of the chat. Deep into a long conversation that first statement
  * scrolls out of weight and Muse drifts back to its own persona (e.g. offering to connect a
- * device instead of requesting a function). This restates the rules that matter every time
- * function calls are still expected, and the function names, without the full schemas.
+ * device instead of sending a request). This restates the rules that matter every time
+ * calls are still expected, and the endpoints, without the full schemas.
  */
 export function renderToolReminder(tools: Array<{ name: string }> = []): string {
   return [
-    "Reminder, still inside the program from earlier in this chat: you decide which function to run next and",
-    'reply with one fenced json code block per call, `{"name": "...", "arguments": {...}}`.',
-    ...(tools.length > 0 ? [`The program can still run: ${functionNames(tools)}.`] : []),
-    "Do not look anything up, browse, search, read files or act on your own, even if you could: requesting a",
-    "function is the only correct way to get information or act; your own machine and subagents cannot see the end",
-    "user's files. Saying that you started, delegated or ran",
-    "something does nothing without its block. Reply as plain text only when no function is needed.",
+    "Reminder, still inside the app from earlier in this chat: you decide which endpoint of the app's API to call next and",
+    'reply with one fenced json code block per request, `{"endpoint": "/api/...", "body": {...}}`.',
+    ...(tools.length > 0 ? [`The app's API still offers: ${endpointList(tools)}.`] : []),
+    "The API only answers inside the end user's app, so your own machine, subagents and scripts cannot reach it, and",
+    "do not look anything up, browse, search, read files or act on your own, even if you could: writing the request",
+    "block is the only correct way to get information or act. Saying that you started, delegated or sent something",
+    "does nothing without its block. Reply as plain text only when no request is needed.",
   ].join(" ");
 }
 
-function functionNames(tools: Array<{ name: string }>): string {
-  return tools.map((tool) => `\`${tool.name}\``).join(", ");
+function endpointList(tools: Array<{ name: string }>): string {
+  return tools.map((tool) => `\`POST ${endpointOf(tool.name)}\``).join(", ");
 }
 
 export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoice | undefined): string {
   if (tools.length === 0 || toolChoice === "none") return "";
 
-  // Client descriptions can be long markdown with their own headings (omp's `task` is 7 kB with
-  // "# Delegation" and an agent that is itself named `task`). Pasted bare, Muse misread where one
-  // function ended and kept answering that `task` was not available, so each function sits in
-  // its own tags and the full name list comes first.
+  // Muse has its own VM and subagents: offered "functions", it kept running them natively or
+  // delegating to its own helpers ("task isn't in my toolset"). An HTTP API that only the end
+  // user's app can reach is something it has no copy of, so it writes the request instead.
+  // Client descriptions can be long markdown with their own headings (omp's `task` is 7 kB), so
+  // each endpoint sits in its own tags after the full list.
   const lines = [
-    `I am building a program. It can run exactly these ${tools.length} functions: ${functionNames(tools)}.`,
-    'Each one is described below between <function name="..."> and </function>; everything inside the tags, headings included, is that function\'s description.',
+    `I am building an app. Its HTTP API has exactly these ${tools.length} endpoints: ${endpointList(tools)}.`,
+    'Each one is described below between <endpoint path="..."> and </endpoint>; everything inside the tags, headings included, is that endpoint\'s description.',
     "",
   ];
   for (const tool of tools) {
-    lines.push(`<function name="${tool.name}">`);
+    lines.push(`<endpoint path="${endpointOf(tool.name)}">`, "Method: POST");
     if (tool.description) lines.push(`Description: ${tool.description}`);
-    lines.push("JSON Schema:", "```json", JSON.stringify(tool.parameters, null, 2), "```", "</function>", "");
+    lines.push("Request body (JSON Schema):", "```json", JSON.stringify(tool.parameters, null, 2), "```", "</endpoint>", "");
   }
-  // Wording measured against Muse: saying that the program runs the function and sends the
-  // result back in the next message is what stops Muse from declining "because it would never
-  // see the result"; naming what it cannot do itself stops it from using its own workspace.
+  // Wording measured against Muse: saying that the app sends the request and returns the
+  // response in the next message is what stops Muse from declining "because it would never
+  // see the result"; naming what it cannot reach stops it from using its own workspace.
   lines.push(
-    "How this works: you decide which function the program should run next and reply with one fenced code block per function call, using language json.",
+    "How this works: you decide which endpoint the app should call next and reply with one fenced code block per request, using language json.",
     "Each block must contain exactly one object:",
-    '{"name": "...", "arguments": {...}}',
-    "The program then runs the function and sends you its result in the next message, and you continue from there.",
-    `All ${tools.length} functions above are available right now. They belong to the program, not to you, so whether you have anything similar yourself does not matter: you only request them, also when a description speaks of agents, subagents or delegation.`,
+    '{"endpoint": "/api/...", "body": {...}}',
+    "The app then sends the request on the end user's machine and gives you the response in the next message, and you continue from there.",
+    `All ${tools.length} endpoints above are available right now. The API only answers inside the end user's app: your own machine, your own subagents and your own scripts cannot reach it, so never call it yourself (no curl, fetch or code); writing the block is how the request is sent. Whether you have anything similar yourself does not matter, also when a description speaks of agents, subagents or delegation.`,
     "Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed, but it is never a substitute for them.",
-    "Every reply is either a final answer to the end user in plain text with no block, or one or more function-call blocks. If you state that you will check, look up, read, run, delegate or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block. Saying that something was started, delegated or run does nothing; only a block makes the program act.",
-    "Inside this program, do not look anything up, browse, search, read files or act on your own, even if you could: the end user needs the answer to come from these functions, so requesting a function is the only correct way to get information or act. Do not run or simulate anything yourself.",
-    "That includes your own workspace: your own machine, your own subagents and your own delegation cannot see the end user's files or results. When a task should go to a helper, request the matching function above instead.",
-    "When no function is needed, reply to the end user as plain text with no such block.",
+    "Every reply is either a final answer to the end user in plain text with no block, or one or more request blocks. If you state that you will check, look up, read, run, delegate or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block. Saying that something was started, delegated or sent does nothing; only a block makes the app act.",
+    "Inside this app, do not look anything up, browse, search, read files or act on your own, even if you could: the end user needs the answer to come from this API, so sending a request is the only correct way to get information or act. Do not run or simulate anything yourself.",
+    "When no request is needed, reply to the end user as plain text with no such block.",
   );
   if (toolChoice === "required") {
-    lines.push("Your reply must request at least one function.");
+    lines.push("Your reply must send at least one request.");
   } else if (typeof toolChoice === "object") {
-    lines.push(`Your reply must request the function \`${toolChoice.name}\`.`);
+    lines.push(`Your reply must send a request to \`POST ${endpointOf(toolChoice.name)}\`.`);
   }
   return lines.join("\n");
 }
@@ -87,7 +92,7 @@ export function renderToolResultBlocks(messages: ChatMessage[], context: ChatMes
     if (message.role !== "tool" || !message.toolCallId) continue;
     const name = names.get(message.toolCallId) ?? "unknown";
     const suffix = message.isError ? " (error)" : "";
-    lines.push(`Function result of ${name} (call ${message.toolCallId})${suffix}:`, message.content);
+    lines.push(`Response from POST ${endpointOf(name)} (request ${message.toolCallId})${suffix}:`, message.content);
   }
   return lines.join("\n");
 }
@@ -97,19 +102,48 @@ export function renderToolResults(messages: ChatMessage[]): string {
   return blocks.length > 0 ? `${blocks}\n${continueInstruction}` : continueInstruction;
 }
 
-function parsedCall(source: string): ParsedToolCall | null {
-  let value: unknown;
+const toolNamePattern = /^[a-zA-Z0-9_-]{1,64}$/;
+
+/** `/api/read_file`, `POST /api/read_file` or `http://host/api/read_file` -> `read_file`. */
+export function toolName(endpoint: string): string | null {
+  const path = endpoint.trim().replace(/^[A-Z]+\s+/, "").replace(/^[a-z]+:\/\/[^/]+/i, "").split(/[?#]/)[0]!;
+  const name = path.replace(/^\/?api\//, "").replace(/^\//, "");
+  return toolNamePattern.test(name) ? name : null;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJson(source: string): unknown {
   try {
-    value = JSON.parse(source.trim());
+    return JSON.parse(source.trim());
   } catch {
-    return null;
+    return undefined;
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.name !== "string" || typeof record.arguments !== "object" || record.arguments === null || Array.isArray(record.arguments)) {
-    return null;
+}
+
+/** A raw HTTP request Muse may write instead: `POST /api/x`, optional headers, a JSON body. */
+function httpCall(source: string): ParsedToolCall | null {
+  const match = /^\s*POST\s+(\S*\/api\/\S+)[^\n]*\n?([\s\S]*)$/.exec(source);
+  if (!match) return null;
+  const name = toolName(match[1]!);
+  const bodyStart = match[2]!.indexOf("{");
+  const body = bodyStart < 0 ? {} : parseJson(match[2]!.slice(bodyStart));
+  return name && isObject(body) ? { name, argumentsJson: JSON.stringify(body) } : null;
+}
+
+function parsedCall(source: string): ParsedToolCall | null {
+  const value = parseJson(source);
+  if (!isObject(value)) return httpCall(source);
+  if (typeof value.endpoint === "string") {
+    const name = toolName(value.endpoint);
+    const body = value.body ?? {};
+    return name && isObject(body) ? { name, argumentsJson: JSON.stringify(body) } : null;
   }
-  return { name: record.name, argumentsJson: JSON.stringify(record.arguments) };
+  // The earlier `{"name", "arguments"}` format, still accepted from threads started before.
+  if (typeof value.name !== "string" || !isObject(value.arguments)) return null;
+  return { name: value.name, argumentsJson: JSON.stringify(value.arguments) };
 }
 
 interface Candidate {
@@ -186,7 +220,7 @@ function markerLineStart(markdown: string, candidate: Candidate): number {
   while (previousEnd > 0 || markdown[previousEnd] !== undefined) {
     const previousStart = markdown.lastIndexOf("\n", previousEnd - 1) + 1;
     const previous = markdown.slice(previousStart, previousEnd).replace(/\r$/, "");
-    if (previous.trim() === "json" || previous.trim() === "tool_call") return previousStart;
+    if (["json", "http", "tool_call"].includes(previous.trim())) return previousStart;
     if (previous.trim().length > 0 || previousStart === 0) break;
     previousEnd = previousStart - 1;
   }
@@ -240,8 +274,8 @@ function possibleBlockStart(markdown: string, from: number): number | null {
       if (rest.startsWith("<tool_call>") || (incomplete && rest.length > 0 && "<tool_call>".startsWith(rest))) {
         return earliest(lineStart);
       }
-      if (rest === "json" || rest === "tool_call") return earliest(lineStart);
-      if (incomplete && rest.length > 0 && ("json".startsWith(rest) || "tool_call".startsWith(rest))) {
+      if (rest === "json" || rest === "http" || rest === "tool_call") return earliest(lineStart);
+      if (incomplete && rest.length > 0 && ["json", "http", "tool_call"].some((marker) => marker.startsWith(rest))) {
         return earliest(lineStart);
       }
     }

@@ -237,7 +237,7 @@ describe("gateway", () => {
       type: "function",
       function: { name: "read_file", arguments: '{"path":"a.txt"}' },
     });
-    expect(gateway.driver.calls[0]?.prompt).toContain('<function name="read_file">');
+    expect(gateway.driver.calls[0]?.prompt).toContain('<endpoint path="/api/read_file">');
     expect(gateway.driver.calls[0]?.prompt).toContain("fenced code block");
   });
 
@@ -288,7 +288,7 @@ describe("gateway", () => {
     expect(second.statusCode).toBe(200);
     expect(second.headers["x-mta-session-reused"]).toBe("1");
     expect(gateway.driver.calls[1]?.prompt).toContain("[tool_result id=");
-    expect(gateway.driver.calls[1]?.prompt).toContain("Function result of read_file");
+    expect(gateway.driver.calls[1]?.prompt).toContain("Response from POST /api/read_file");
 
     const secondReply = second.json().choices[0].message.content as string;
     const third = await gateway.app.inject({
@@ -344,8 +344,8 @@ describe("gateway", () => {
     expect(second.statusCode).toBe(200);
     expect(second.headers["x-mta-session-reused"]).toBe("1");
     expect(gateway.driver.calls[1]?.prompt).toContain("Now rename the untitled project");
-    expect(gateway.driver.calls[1]?.prompt).toContain("still inside the program");
-    expect(gateway.driver.calls[1]?.prompt).toContain("The program can still run: `read_file`.");
+    expect(gateway.driver.calls[1]?.prompt).toContain("still inside the app");
+    expect(gateway.driver.calls[1]?.prompt).toContain("The app's API still offers: `POST /api/read_file`.");
     expect(gateway.driver.calls[1]?.prompt.toLowerCase()).not.toMatch(/\btool\b|tool_call|channel|computer|execute/);
   });
 
@@ -386,7 +386,7 @@ describe("gateway", () => {
       },
     });
     expect(response.statusCode).toBe(200);
-    expect(gateway.driver.calls.at(-1)?.prompt).not.toContain('<function name="read_file">');
+    expect(gateway.driver.calls.at(-1)?.prompt).not.toContain('<endpoint path="/api/read_file">');
   });
 
   it("serves Anthropic messages in streaming and non-streaming form", async () => {

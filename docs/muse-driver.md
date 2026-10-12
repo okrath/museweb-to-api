@@ -99,9 +99,15 @@ the sent history, e.g. because the client pruned an old function round out of co
 Muse as bare text. Muse then drifted back to its own persona instead of requesting a function —
 in one observed case, offering to connect a device to read a file directly rather than calling
 `read_file`. `renderToolReminder` (`src/prompt/tool-protocol.ts`) is a short restatement of the
-rules that matter (decide the next function, reply with a fenced json block; never look anything
-up or act on your own; saying something was delegated does nothing without its block) plus the
-function names. `thread-role.ts#promptForRequest` passes `activeTools` whenever a resumed turn
+rules that matter (decide the next endpoint, reply with a fenced json request block; the API is
+unreachable from Muse's own machine; never look anything up or act on your own; saying something
+was delegated does nothing without its block) plus the endpoint list.
+
+Tools are framed as the HTTP API of the user's app (`POST /api/<tool name>`), not as functions.
+Muse has its own VM and subagents: offered "functions", it often ran them natively ("unknown
+tool") or delegated to its own helpers ("the task tool isn't available in my toolset"). An API
+that only the end user's app can reach is something it has no copy of, so it writes the request
+block and the gateway strips `/api/` to recover the tool name. `thread-role.ts#promptForRequest` passes `activeTools` whenever a resumed turn
 still has `req.tools` (and `toolChoice !== "none"`), and `renderResumedTranscript`
 prepends the reminder to every return path except the one that already appends its own
 `Continue: ...` line after a function result. Confirmed live 2026-09-22: the same resumed,

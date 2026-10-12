@@ -170,16 +170,19 @@ status.
 
 ## Tool calling
 
-OpenAI `tools` and Anthropic `tools` are rendered into a new Muse thread as functions the
-program can run. Muse is asked to request a function by replying with one fenced `json` block
-per call, for example:
+OpenAI `tools` and Anthropic `tools` are rendered into a new Muse thread as the HTTP API of
+the user's app: each tool becomes an endpoint `POST /api/<tool name>` whose request body is the
+tool's JSON Schema (tool `readABC` → `POST /api/readABC`). Muse is asked to send a request by
+replying with one fenced `json` block per call, for example:
 
 ```json
-{"name": "read_file", "arguments": {"path": "notes.txt"}}
+{"endpoint": "/api/read_file", "body": {"path": "notes.txt"}}
 ```
 
-The gateway removes those blocks from streamed text and returns standard `tool_calls` or
-`tool_use` events. Send the assistant call and the resulting tool messages back in the next
+The gateway strips `/api/` to get the tool name back, removes those blocks from streamed text
+and returns standard `tool_calls` or `tool_use` events. A raw `POST /api/<name>` request block
+and the earlier `{"name", "arguments"}` format are accepted too. Tool results go back to Muse as
+the endpoint's response. Send the assistant call and the resulting tool messages back in the next
 request to continue the same Muse conversation. This is prompt emulation: success depends on
 the model following the format, and the gateway does not perform JSON Schema validation beyond
 requiring an object for parsed arguments. Requests with active tools bypass the response cache.
