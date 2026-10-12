@@ -17,6 +17,17 @@ export interface SnapshotArgs {
   ignore: string[];
   /** Leading part of the prompt, used to recognise the echoed user message. */
   promptHead: string;
+  /** `promptTailKey(prompt)`: tells our message from another that shares its head. */
+  promptTail: string;
+}
+
+/**
+ * Letters and digits from the end of a prompt. omp requests all start with the same system
+ * prompt, so only the end tells two prompts apart; punctuation and spacing are dropped so the key
+ * survives however the page renders the message.
+ */
+export function promptTailKey(prompt: string): string {
+  return prompt.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase().slice(-80);
 }
 
 export interface CandidateSummary {
@@ -39,6 +50,8 @@ export interface PageSnapshot {
   targetId: string;
   /** A user message containing the prompt head exists, i.e. the prompt was posted. */
   promptPosted: boolean;
+  /** A user message holds both the prompt head and its tail key: this thread holds our prompt. */
+  promptEchoed: boolean;
   /** Text under the posted prompt when Muse could not deliver it. */
   deliveryStatus: string;
   freshRoots: number;
@@ -109,6 +122,10 @@ export function snapshotScript(args: SnapshotArgs): PageSnapshot {
 
   const userItems = query(args.user);
   const postedItem = [...userItems].reverse().find(echoesPrompt);
+  // Same reduction as promptTailKey, which cannot be imported into the page.
+  const tailKey = (value: string) => value.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+  const promptEchoed =
+    args.promptTail.length > 0 && userItems.some((el) => echoesPrompt(el) && tailKey(el.textContent ?? "").includes(args.promptTail));
 
   let usable: Element[];
   if (args.assistant.length > 0 && postedItem) {
@@ -174,6 +191,7 @@ export function snapshotScript(args: SnapshotArgs): PageSnapshot {
     text,
     targetId: target?.getAttribute("data-message-id") ?? "",
     promptPosted,
+    promptEchoed,
     deliveryStatus,
     freshRoots: fresh.length,
     candidates: usable.length,

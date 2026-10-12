@@ -84,12 +84,15 @@ New conversation (`/thread/new`):
    virtualised list, so a new thread changes the top row rather than the row count) and, at the
    same time, watches the draft page for a reply after the posted prompt.
 3. When a row changed, the driver clicks the newest rows (up to three) until one holds a user
-   item echoing the prompt, skipping any thread another gateway tab has open
-   (`MuseBrowser.conversationOpenElsewhere`). A thread busy in another tab jumps to the top just
-   like a new one and passes the echo check (its messages are all unseen in this tab, and every
-   omp request starts with the same system prompt): on 2026-10-12 a warm-pool refill claimed the
-   warm thread a request was answering in, cut that reply short and filed the used thread as a
-   clean warm one. A thread opened right after creation often shows "Something went
+   item containing both the prompt head and its tail key (`promptTailKey`: the last 80 letters
+   and digits). It skips any thread another gateway tab has open
+   (`MuseBrowser.conversationOpenElsewhere`) and any thread this process already created or
+   continued (`claimedThreads`). A thread busy in another tab, or one another turn has just
+   finished in, sits at the top just like a new one, and every omp request starts with the same
+   system prompt, so the head alone matches it. On 2026-10-12 this let a warm-pool refill claim
+   the warm thread a request was answering in, and let one subagent's new chat claim the chat
+   another subagent had just finished a turn in, after that tab had moved on to another chat.
+   Both subagents then posted into one Muse chat. A thread opened right after creation often shows "Something went
    wrong", so it waits up to 15 s for the transcript and reloads up to three times. When the reply
    showed up on the draft page instead, it reads it there and then takes the conversation id from
    the URL, or from the panel row that holds the prompt. The thread URL becomes the conversation id.

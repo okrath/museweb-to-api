@@ -11,6 +11,12 @@ const THREAD_LOAD_ATTEMPTS = 3;
 /** Newest panel rows to try when looking for the thread that holds a freshly posted prompt. */
 const THREAD_ROW_CANDIDATES = 3;
 
+/**
+ * Side chats this process has created or continued. None of them is ever a thread a new prompt
+ * just created, even when it holds an identical prompt (every warm-up sends the same one).
+ */
+export const claimedThreads = new Set<string>();
+
 async function threadRows(page: Page): Promise<ThreadRow[]> {
   return page.evaluate(threadRowsScript, { row: selectors.threadRow });
 }
@@ -64,12 +70,12 @@ async function openRowWithPrompt(
   await page.waitForURL((url) => threadUrlPattern.test(url.pathname), { timeout: 10_000 }).catch(() => undefined);
   const landed = conversationIdFromUrl(page.url(), ctx.config.museUrl);
   if (!landed) return undefined;
-  // A thread busy in another tab jumps to the top of the panel exactly like a new one, and its
-  // transcript passes the prompt check (all its messages are unseen here and every omp request
-  // starts with the same system prompt). Claiming it cut that tab's reply short and filed a used
-  // conversation as a clean warm thread (seen live 2026-10-12).
-  if (ctx.openElsewhere?.(page, landed)) {
-    trace?.({ at: Date.now(), stage: "thread_skipped", note: `${landed} is open in another tab` });
+  // A thread busy in another tab, or one another turn just finished in, sits at the top of the
+  // panel exactly like a new one. Claiming it cut that tab's reply short, filed a used
+  // conversation as a clean warm thread, and handed one subagent another's reply (seen live
+  // 2026-10-12, the last after the other tab had already moved on).
+  if (claimedThreads.has(landed) || ctx.openElsewhere?.(page, landed)) {
+    trace?.({ at: Date.now(), stage: "thread_skipped", note: `${landed} belongs to another turn` });
     return undefined;
   }
   for (let attempt = 0; attempt < THREAD_LOAD_ATTEMPTS; attempt++) {
@@ -77,12 +83,14 @@ async function openRowWithPrompt(
     await waitForComposer(page, ctx.config.museUrl);
     const renderDeadline = Date.now() + THREAD_RENDER_WAIT_MS;
     let snap = await snapshot();
-    while (!snap.promptPosted && snap.candidates === 0 && Date.now() < renderDeadline) {
+    while (!snap.promptEchoed && snap.candidates === 0 && Date.now() < renderDeadline) {
       await sleep(POLL_MS);
       snap = await snapshot();
     }
     trace?.({ at: Date.now(), stage: "thread_opened", note: `${page.url()} attempt=${attempt + 1}`, snapshot: snap });
-    if (snap.promptPosted) return landed;
+    // Every message is unseen in a freshly opened thread, so `promptPosted` would accept any of
+    // them; only a message that holds this prompt's head and tail proves the thread is ours.
+    if (snap.promptEchoed) return landed;
     // A transcript that rendered other messages but not ours is simply the wrong thread.
     if (snap.candidates > 0 || snap.freshRoots > 0) return undefined;
   }

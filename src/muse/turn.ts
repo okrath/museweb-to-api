@@ -3,9 +3,9 @@ import type { TurnEvent, TurnInput } from "../core/types.js";
 import { computeMedian } from "./browser.js";
 import { attachFiles, openConversation, selectMode, submit, typePrompt } from "./composer.js";
 import { htmlToMarkdown } from "./markdown.js";
-import { ensureThreadPanel, resolveCreatedThread, resolveThreadAfterReply, serialized } from "./new-thread.js";
+import { claimedThreads, ensureThreadPanel, resolveCreatedThread, resolveThreadAfterReply, serialized } from "./new-thread.js";
 import { type DriverContext, firstVisible, POLL_MS, sleep, TurnError, type TurnTrace } from "./page-context.js";
-import { markSeenScript, snapshotScript, type PageSnapshot } from "./page-scripts.js";
+import { markSeenScript, promptTailKey, snapshotScript, type PageSnapshot } from "./page-scripts.js";
 import { conversationIdFromUrl, deliveryFailurePattern, isSignedInUrl, rateLimitPattern, selectors, upstreamErrorPattern } from "./selectors.js";
 import { createReaderState, decide, DeltaStreamer, type ReaderTimings } from "./turn-reader.js";
 
@@ -39,6 +39,7 @@ export async function executeTurn(
       alerts: selectors.alerts,
       ignore: selectors.ignore,
       promptHead: input.prompt.slice(0, 120),
+      promptTail: promptTailKey(input.prompt),
     };
     const snapshot = () => page.evaluate(snapshotScript, snapshotArgs);
 
@@ -58,6 +59,7 @@ export async function executeTurn(
     };
 
     if (input.conversationId) {
+      claimedThreads.add(input.conversationId);
       await typePrompt(page, composer, input.prompt);
       trace?.({ at: Date.now(), stage: "prompt_typed" });
       await submit(page, composer, snapshot, ctx);
@@ -81,6 +83,7 @@ export async function executeTurn(
       const conversationId =
         conversationIdFromUrl(page.url(), ctx.config.museUrl) ??
         (where === "draft" ? await resolveThreadAfterReply(page, ctx, snapshot, trace) : undefined);
+      if (conversationId) claimedThreads.add(conversationId);
       return finishTurn(reply.text, conversationId, reply.snapshotMs);
     });
   } finally {
