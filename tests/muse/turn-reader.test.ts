@@ -73,6 +73,12 @@ describe("htmlToMarkdown", () => {
       '<p>Use <strong>fill</strong>:</p><pre><code class="language-ts">const a = 1;\n</code></pre><ul><li>one</li><li>two</li></ul><button>Copy</button><svg></svg>';
     expect(htmlToMarkdown(html)).toBe("Use **fill**:\n\n```ts\nconst a = 1;\n```\n\n- one\n- two");
   });
+
+  it("keeps line breaks when each code line is its own block span", () => {
+    const line = (text: string) => `<span class="block before:inline-block"><span>${text}</span></span>`;
+    const html = `<pre class="language-bash"><code class="[counter-reset:line]">${line("git log")}${line("")}${line("echo  done")}</code></pre>`;
+    expect(htmlToMarkdown(html)).toBe("```\ngit log\n\necho  done\n```");
+  });
 });
 
 describe("url helpers", () => {

@@ -133,7 +133,9 @@ after.
    items containing untagged nodes, and without any explicit selector to "fresh subtrees minus
    composer, echo and chrome".
 3. `strip` selectors are removed from a clone of the reply before turndown converts it to
-   Markdown; `DeltaStreamer` streams finished paragraphs only.
+   Markdown; `DeltaStreamer` streams finished paragraphs only. Muse's code highlighter renders each
+   line of a code block as a `<span class="block">` (`codeLineClass`) with no `\n` between lines,
+   so `markdown.ts` joins those spans with newlines instead of taking `textContent`.
 4. Completion (`turn-reader.ts#decide`): non-empty text, no `stopButton` visible, and 1.5 s of
    quiet (4 s if no stop button was ever seen). Alerts matching `rateLimitPattern` become `429`;
    `upstreamErrorPattern` before any text becomes `502`. A timeout message includes whether the

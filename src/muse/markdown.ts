@@ -1,5 +1,6 @@
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import { codeLineClass } from "./selectors.js";
 
 const turndown = new TurndownService({
   headingStyle: "atx",
@@ -23,7 +24,7 @@ turndown.addRule("fencedCodeWithLanguage", {
     const code = (node as HTMLElement).firstElementChild as HTMLElement;
     const className = code.getAttribute("class") ?? "";
     const language = /language-([\w+-]+)/.exec(className)?.[1] ?? "";
-    const text = code.textContent ?? "";
+    const text = codeText(code);
     return `\n\n\`\`\`${language}\n${text.replace(/\n$/, "")}\n\`\`\`\n\n`;
   },
 });
@@ -41,6 +42,16 @@ turndown.addRule("compactListItem", {
     return `${prefix}${normalized}${node.nextSibling ? "\n" : ""}`;
   },
 });
+
+/** Code text with its line breaks, also when every line is its own element without a "\n". */
+function codeText(code: HTMLElement): string {
+  const lines = Array.from(code.children);
+  const lineElements =
+    lines.length > 0 &&
+    lines.length === code.childNodes.length &&
+    lines.every((line) => line.nodeName === "SPAN" && (line.getAttribute("class") ?? "").split(/\s+/).includes(codeLineClass));
+  return lineElements ? lines.map((line) => line.textContent ?? "").join("\n") :(code.textContent ?? "");
+}
 
 export function htmlToMarkdown(html: string): string {
   if (!html.trim()) return "";

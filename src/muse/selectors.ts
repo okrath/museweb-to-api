@@ -94,6 +94,11 @@ export const selectors = {
   usageProgressbar: ['[role="dialog"] [role="progressbar"]'],
 };
 
+/**
+ * Muse's code highlighter renders each line of a code block as a `<span class="block">` child of
+ * `<code>`, with no newline text between them. Seen 2026-10-12.
+ */
+export const codeLineClass = "block";
 export const mainChatRowPattern = /^main chat\b/i;
 export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;
 /** Matches both the "Delete" menu item and the "Delete" button inside its confirm dialog. */
