@@ -102,6 +102,12 @@ export const selectors = {
  * `<code>`, with no newline text between them. Seen 2026-10-12.
  */
 export const codeLineClass = "block";
+/**
+ * A reply made only of `key=value` lines is shown as a label/value grid instead of text: one
+ * `div.contents` row per pair holding a capitalized label span and a value span, the `=` gone.
+ * The original text is not in the page. Seen 2026-10-12.
+ */
+export const keyValueGridClass = "grid-cols-[auto_1fr]";
 
 export const mainChatRowPattern = /^main chat\b/i;
 export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;

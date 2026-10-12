@@ -137,7 +137,11 @@ after.
    line of a code block as a `<span class="block">` (`codeLineClass`) with no `\n` between lines,
    so `markdown.ts` joins those spans with newlines instead of taking `textContent`. The block's
    header (`data-streamdown="code-block-header"`) only repeats the language, so it is stripped and
-   the fence takes the language from the `language-*` class on `<pre>` or `<code>`.
+   the fence takes the language from the `language-*` class on `<pre>` or `<code>`. A reply made
+   only of `key=value` lines is shown as a label/value grid (`keyValueGridClass`) with capitalized
+   labels and no `=`; the original text is not in the page (the transport is encrypted), so the
+   driver renders it as one `Label: value` line per pair. A client that needs an exact format
+   should ask for it inside a code block, which Muse leaves verbatim.
 4. Completion (`turn-reader.ts#decide`): non-empty text, no `stopButton` visible, and 1.5 s of
    quiet (4 s if no stop button was ever seen). Alerts matching `rateLimitPattern` become `429`;
    `upstreamErrorPattern` before any text becomes `502`. A timeout message includes whether the

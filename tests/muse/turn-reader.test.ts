@@ -74,6 +74,13 @@ describe("htmlToMarkdown", () => {
     expect(htmlToMarkdown(html)).toBe("Use **fill**:\n\n```ts\nconst a = 1;\n```\n\n- one\n- two");
   });
 
+  it("turns Muse's key-value grid into one label: value line per pair", () => {
+    const row = (label: string, value: string) => `<div class="contents"><span class="text-tertiary">${label}</span><span class="font-mono">${value}</span></div>`;
+    const html = `<div class="px-4"><div class="grid grid-cols-[auto_1fr] gap-x-4">${row("Max", "10")}${row("Idle", "300")}</div></div>`;
+    expect(htmlToMarkdown(html)).toBe("Max: 10\nIdle: 300");
+    expect(htmlToMarkdown('<div class="grid grid-cols-[auto_1fr]"><p>one</p><p>two</p></div>')).toBe("one\n\ntwo");
+  });
+
   it("keeps line breaks when each code line is its own block span", () => {
     const line = (text: string) => `<span class="block before:inline-block"><span>${text}</span></span>`;
     const html = `<pre class="language-bash"><code class="[counter-reset:line]">${line("git log")}${line("")}${line("echo  done")}</code></pre>`;
