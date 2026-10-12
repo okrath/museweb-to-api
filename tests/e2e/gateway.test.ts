@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseSse, startTestGateway, type TestGateway } from "../helpers/server.js";
-import { unverifiedAnswerNotice } from "../../src/router/route-request.js";
+import { unreadableBlocksNotice, unverifiedAnswerNotice } from "../../src/router/route-request.js";
 
 let gateway: TestGateway;
 
@@ -314,6 +314,53 @@ describe("gateway", () => {
       .map((frame) => JSON.parse(frame.data) as { choices: Array<{ delta: { content?: string }; finish_reason: string | null }> });
     expect(chunks.map((chunk) => chunk.choices[0]!.delta.content ?? "").join("")).toBe(unverifiedAnswerNotice);
     expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("stop");
+    expect(gateway.driver.calls).toHaveLength(2);
+  });
+
+  it("drops every request of a reply with an unreadable glued block and asks Muse to resend", async () => {
+    const write = { type: "function", function: { name: "write", parameters: { type: "object" } } };
+    const edit = { type: "function", function: { name: "edit", parameters: { type: "object" } } };
+    // As read from the page: the glued write block lost the backslashes of its \" escapes.
+    gateway.driver.enqueue({
+      chunks: [
+        'I\'ll create format.js and patch cart.js.\\`\\`\\`json  \n{"endpoint": "/api/write", "body": {"path": "format.js", "content": "return "$" + x;"}}\n\n```\n\n```json\n{"endpoint": "/api/edit", "body": {"path": "cart.js"}}\n```',
+      ],
+    });
+    gateway.driver.enqueue({
+      chunks: ['```json\n{"endpoint": "/api/write", "body": {"path": "format.js"}}\n```\n\n```json\n{"endpoint": "/api/edit", "body": {"path": "cart.js"}}\n```'],
+    });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", stream: true, messages: [{ role: "user", content: "Refactor cart.js" }], tools: [write, edit] },
+    });
+    const chunks = parseSse(response.payload)
+      .filter((frame) => frame.data !== "[DONE]")
+      .map((frame) => JSON.parse(frame.data) as { choices: Array<{ delta: { content?: string; tool_calls?: Array<{ function?: { name?: string } }> }; finish_reason: string | null }> });
+    const content = chunks.map((chunk) => chunk.choices[0]!.delta.content ?? "").join("");
+    const names = chunks.flatMap((chunk) => chunk.choices[0]!.delta.tool_calls ?? []).map((call) => call.function?.name).filter(Boolean);
+    expect(content).toBe("I'll create format.js and patch cart.js.");
+    expect(names).toEqual(["write", "edit"]);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(gateway.driver.calls[1]?.prompt).toContain("instead of on its own line");
+  });
+
+  it("sends no requests and says so when the resent reply is still unreadable", async () => {
+    const write = { type: "function", function: { name: "write", parameters: { type: "object" } } };
+    const glued = 'Writing it now.\\`\\`\\`json  \n{"endpoint": "/api/write", "body": {"content": "return "$";"}}';
+    gateway.driver.enqueue({ chunks: [glued] });
+    gateway.driver.enqueue({ chunks: [glued] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "Write format.js" }], tools: [write] },
+    });
+    const choice = response.json().choices[0];
+    expect(choice.message.tool_calls).toBeUndefined();
+    expect(choice.message.content).toBe(`Writing it now.\n\nWriting it now.\n\n${unreadableBlocksNotice}`);
+    expect(choice.finish_reason).toBe("stop");
     expect(gateway.driver.calls).toHaveLength(2);
   });
 

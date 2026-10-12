@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../../src/core/types.js";
 import { announcesWithoutRequest, createToolTextFilter, parseToolCalls, taskWithoutAnyRequest, renderToolProtocol, renderToolReminder, renderToolResults, toolName } from "../../src/prompt/tool-protocol.js";
+import { gluedFenceStart } from "../../src/prompt/inline-fence.js";
 
 const tools = [
   { name: "read_file", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } } } },
@@ -19,6 +20,8 @@ describe("tool prompt protocol", () => {
     expect(prompt).toContain("Your reply must send at least one request.");
     expect(prompt).toContain("must go in a later reply, once that response has arrived.");
     expect(renderToolReminder(tools)).toContain("must go in a later reply, once that response has arrived.");
+    expect(prompt).toContain("always put a line break before the opening ``` of a block.");
+    expect(renderToolReminder(tools)).toContain("always put a line break before the opening ``` of a block.");
     expect(renderToolReminder(tools).toLowerCase()).not.toMatch(/\btool\b|tool_call|channel|computer|execute/);
     expect(renderToolProtocol(tools, { name: "write_file" })).toContain("Your reply must send a request to `POST /api/write_file`.");
     expect(prompt.toLowerCase()).not.toMatch(/\btool\b|tool_call|channel|computer|execute/);
@@ -105,6 +108,14 @@ describe("tool prompt protocol", () => {
     expect(filter.finish()).toMatchObject({ unsentText: "", calls: [{ name: "edit" }] });
 
     expect(parseToolCalls("Use \\`\\`\\` to open a fence.")).toEqual({ text: "Use \\`\\`\\` to open a fence.", calls: [] });
+  });
+
+  it("finds fences glued onto text, escaped or not, but not fences that start a line", () => {
+    expect(gluedFenceStart("Fixing now.\\`\\`\\`json")).toBe(11);
+    expect(gluedFenceStart("Fixing now.```json")).toBe(11);
+    expect(gluedFenceStart("Fixing now.\n```json\n{}\n```")).toBe(-1);
+    expect(gluedFenceStart("Use ```js fences.")).toBe(-1);
+    expect(gluedFenceStart("````\n{}\n````")).toBe(-1);
   });
 
   it("supports tag fallback and four-backtick fences", () => {

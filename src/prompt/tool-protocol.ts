@@ -1,5 +1,5 @@
 import type { ChatMessage, ToolChoice, ToolDefinition } from "../core/types.js";
-import { escapedFence, inlineFenceBlocks } from "./inline-fence.js";
+import { gluedFenceStart, inlineFenceBlocks } from "./inline-fence.js";
 
 export interface ParsedToolCall {
   name: string;
@@ -16,6 +16,8 @@ const continueInstruction = "Continue: reply to the end user, or send the next r
 // missed that commit, because the client runs the requests of one reply concurrently.
 const parallelRequestsRule =
   "The app may send the requests of one reply at the same time and in any order, so a request that needs the result of another one must go in a later reply, once that response has arrived.";
+// A fence glued onto a sentence ("now.```json") is shown as plain text, which loses characters.
+const ownLineRule = "Start every block on a new line: always put a line break before the opening ``` of a block.";
 
 /** Every client tool is shown to Muse as `POST /api/<tool name>`; `toolName` strips it again. */
 export function endpointOf(name: string): string {
@@ -40,6 +42,7 @@ export function renderToolReminder(tools: Array<{ name: string }> = []): string 
     "block is the only correct way to get information or act. Saying that you started, delegated or sent something",
     "does nothing without its block.",
     parallelRequestsRule,
+    ownLineRule,
     "Reply as plain text only when no request is needed.",
   ].join(" ");
 }
@@ -74,7 +77,7 @@ export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoi
     '{"endpoint": "/api/...", "body": {...}}',
     "The app then sends the request on the end user's machine and gives you the response in the next message, and you continue from there.",
     `All ${tools.length} endpoints above are available right now. The API only answers inside the end user's app: your own machine, your own subagents and your own scripts cannot reach it, so never call it yourself (no curl, fetch or code); writing the block is how the request is sent. Whether you have anything similar yourself does not matter, also when a description speaks of agents, subagents or delegation.`,
-    "Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed, but it is never a substitute for them.",
+    `Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed, but it is never a substitute for them. ${ownLineRule}`,
     `${parallelRequestsRule} For example, a request that reads a log after a commit goes in the reply after the commit's response.`,
     "Every reply is either a final answer to the end user in plain text with no block, or one or more request blocks. If you state that you will check, look up, read, run, delegate or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block. Saying that something was started, delegated or sent does nothing; only a block makes the app act.",
     "Inside this app, do not look anything up, browse, search, read files or act on your own, even if you could: the end user needs the answer to come from this API, so sending a request is the only correct way to get information or act. Do not run or simulate anything yourself.",
@@ -89,6 +92,9 @@ export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoi
 }
 
 /** Sent into the same thread when a reply announced an action but carried no request block. */
+export const unreadableBlockNudge =
+  "In your last reply a ``` fence came right after other text instead of on its own line, so the app could not read those request blocks and sent none of that reply's requests. Send all of them again, each block starting on a new line.";
+
 export const missingRequestNudge =
   "Your last reply said what you would do next, but it contained no request block, so the app sent nothing. Send the request block(s) now, in the same json format. If no request is needed after all, reply to the end user instead.";
 
@@ -317,7 +323,7 @@ function inlineFenceCalls(markdown: string): ParsedToolMarkdown | null {
 function possibleBlockStart(markdown: string, from: number): number | null {
   const tag = "<tool_call>";
   let tagStart = markdown.indexOf(tag, from);
-  const inlineFence = markdown.indexOf(escapedFence, from);
+  const inlineFence = gluedFenceStart(markdown, from);
   if (inlineFence >= 0) tagStart = tagStart < 0 ? inlineFence : Math.min(tagStart, inlineFence);
   for (let length = tag.length - 1; length > 0; length--) {
     if (markdown.endsWith(tag.slice(0, length))) {

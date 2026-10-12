@@ -9,7 +9,9 @@ import {
   missingRequestNudge,
   noRequestYetNudge,
   taskWithoutAnyRequest,
+  unreadableBlockNudge,
 } from "../prompt/tool-protocol.js";
+import { gluedFenceStart } from "../prompt/inline-fence.js";
 import { RouteError } from "../protocol/errors.js";
 import { findModel, resolveMode } from "../protocol/models.js";
 import { fingerprint, lookupFingerprint, type SessionStore } from "../sessions/session-store.js";
@@ -62,6 +64,18 @@ interface TurnOutcome {
   error?: Extract<TurnEvent, { type: "error" }>;
 }
 
+type NudgeReason = "announced" | "unreadable" | "unverified";
+
+const nudges: Record<NudgeReason, { prompt: string; kind: "loud" | "quiet"; log: string }> = {
+  announced: { prompt: missingRequestNudge, kind: "loud", log: "Muse announced an action without a request; nudging once" },
+  unreadable: { prompt: unreadableBlockNudge, kind: "loud", log: "Muse glued a request block onto text; nudging once to resend" },
+  unverified: { prompt: noRequestYetNudge, kind: "quiet", log: "Muse answered a task without any request; nudging once" },
+};
+
+/** Sent instead of requests the app could not read: a fence glued onto text, even after a nudge. */
+export const unreadableBlocksNotice =
+  "Muse sent request blocks the app could not read (a ``` fence glued onto text), so none of that reply's requests were sent. Ask again.";
+
 /** Sent instead of an answer Muse gave to a task without running any request, even after a nudge. */
 export const unverifiedAnswerNotice =
   "Muse answered without sending any request to this app, so nothing was read, changed or run on your machine. Its answer describes work done elsewhere and was withheld. Ask again or rephrase the task.";
@@ -105,20 +119,24 @@ async function runOnce(
 
   const turn = { deps, req, mode, outcome, forward, streamed };
   const first = await runDriverTurn(turn, prompt, conversationId, "first");
-  // One nudge, in the same thread, when a tool reply carries no request block although it
-  // either announced one or claims a finished task that never ran anything on the client.
+  // One nudge, in the same thread, when a tool reply carries no readable request block although
+  // it announced one, glued a block onto text, or claims a finished task that never ran anything.
   if (first.nudge && outcome.conversationId && !req.clientAbort.aborted) {
-    const announced = first.nudge === "announced";
-    deps.log.info(
-      { requestId: req.requestId, conversationId: outcome.conversationId, reason: first.nudge },
-      announced ? "Muse announced an action without a request; nudging once" : "Muse answered a task without any request; nudging once",
-    );
-    await runDriverTurn(turn, announced ? missingRequestNudge : noRequestYetNudge, outcome.conversationId, announced ? "loud" : "quiet");
+    const nudge = nudges[first.nudge];
+    deps.log.info({ requestId: req.requestId, conversationId: outcome.conversationId, reason: first.nudge }, nudge.log);
+    await runDriverTurn(turn, nudge.prompt, outcome.conversationId, nudge.kind);
   } else if (first.nudge) {
     // No thread to nudge in (or the client left): end the held-back turn as it was.
-    if (first.nudge === "unverified" && outcome.text.length > 0) {
-      streamed.text += outcome.text;
-      forward({ type: "text_delta", text: outcome.text });
+    let late = "";
+    if (first.nudge === "unverified") {
+      late = outcome.text;
+    } else if (first.nudge === "unreadable") {
+      late = outcome.text ? `\n\n${unreadableBlocksNotice}` : unreadableBlocksNotice;
+      outcome.text += late;
+    }
+    if (late.length > 0) {
+      streamed.text += late;
+      forward({ type: "text_delta", text: late });
     }
     forward({ type: "done", stopReason: "end_turn" });
   }
@@ -144,7 +162,7 @@ async function runDriverTurn(
   prompt: string,
   conversationId: string | undefined,
   kind: "first" | "loud" | "quiet",
-): Promise<{ nudge?: "announced" | "unverified" }> {
+): Promise<{ nudge?: NudgeReason }> {
   const { deps, req, mode, outcome, forward, streamed } = state;
   const now = deps.now ?? Date.now;
   if (conversationId && deps.registry) deps.registry.begin(conversationId);
@@ -154,7 +172,7 @@ async function runDriverTurn(
   const held = kind === "quiet" || (kind === "first" && req.toolChoice !== "none" && taskWithoutAnyRequest(req.messages));
   const textBefore = outcome.text;
   let separate = kind !== "quiet" && textBefore.length > 0;
-  let nudge: "announced" | "unverified" | undefined;
+  let nudge: NudgeReason | undefined;
   const sendToolText = (text: string) => {
     if (text.length === 0) return;
     const delta = separate ? `\n\n${text}` : text;
@@ -197,6 +215,24 @@ async function runDriverTurn(
         } else if (toolFilter) {
           const parsed = toolFilter.finish();
           const calls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
+          const glued = req.toolChoice === "none" ? -1 : gluedFenceStart(parsed.text);
+          if (glued >= 0) {
+            // A block glued onto text may have lost characters on the page, so none of this
+            // reply's requests are sent: running only the readable ones would leave a step half done.
+            deps.log.warn({ requestId: req.requestId, kind }, "Muse glued a request block onto text; its requests were dropped");
+            const readable = parsed.text.slice(0, glued).trim();
+            const own = kind === "first" ? readable : [readable, unreadableBlocksNotice].filter((part) => part.length > 0).join("\n\n");
+            outcome.text = [kind === "quiet" ? "" : textBefore, own].filter((part) => part.length > 0).join("\n\n");
+            outcome.toolCalls = [];
+            const forwarded = req.stream && !held ? parsed.text.length - parsed.unsentText.length : 0;
+            sendToolText(own.slice(Math.min(forwarded, readable.length)));
+            if (kind === "first" && !outcome.error) {
+              nudge = "unreadable";
+              return;
+            }
+            forward({ type: "done", stopReason: "end_turn" });
+            return;
+          }
           if (kind === "quiet" && calls.length === 0) {
             // "OK" means no request was needed and the held answer stands. Anything else means
             // Muse still claims work that never ran on the client, so the client is told that.

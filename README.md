@@ -200,8 +200,11 @@ client, so the client gets an explicit notice instead of that answer ("Muse answ
 sending any request to this app, so nothing was read, changed or run on your machine…").
 
 Muse also sometimes glues a request block's opening fence onto the previous sentence
-("…now.```json"); its page then shows the block as plain text. The gateway still reads such a
-block as a call.
+("…now.```json"); its page then shows the block as plain text and drops the `\` of escapes such
+as `\"`. The protocol asks for every opening fence on its own line. When such a block's JSON
+still parses, the gateway reads it as a call. Otherwise none of that reply's requests are sent,
+because running only the readable ones would leave a step half done; the gateway asks Muse once
+to resend them, and if the resent reply is unreadable too the client gets an explicit notice.
 
 Measured on 2026-09-21, Muse requested the function in about five of six eligible turns and
 answered the rest directly from its own abilities; when a call is mandatory, send

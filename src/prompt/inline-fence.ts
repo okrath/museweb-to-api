@@ -4,7 +4,7 @@
  * Markdown converter escapes the backticks and brackets in it, so no fence starts a line. This
  * finds such blocks: an escaped fence followed by one JSON object, with or without a closing fence.
  */
-export const escapedFence = "\\`\\`\\`";
+const escapedFence = "\\`\\`\\`";
 
 export interface InlineFenceBlocks {
   /** Text before the first escaped fence, exactly as received. */
@@ -13,6 +13,19 @@ export interface InlineFenceBlocks {
   rest: string;
   /** Each block in `rest`: its range (opening fence to closing fence or object end) and JSON body. */
   blocks: Array<{ start: number; end: number; body: string }>;
+}
+
+/**
+ * Where the first fence glued onto preceding text starts, escaped or not, or -1. Whatever such a
+ * block held may have lost characters on Muse's page (it drops the `\` of `\"`), so it can only
+ * be read when its JSON still parses.
+ */
+export function gluedFenceStart(text: string, from = 0): number {
+  const glued = /\\`\\`\\`|[^\s`\\]```/g;
+  glued.lastIndex = Math.max(0, from);
+  const match = glued.exec(text);
+  if (!match) return -1;
+  return match[0].startsWith("\\") ? match.index : match.index + 1;
 }
 
 function unescapeMarkdown(text: string): string {
