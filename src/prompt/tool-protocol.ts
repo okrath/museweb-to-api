@@ -95,7 +95,7 @@ export function announcesWithoutRequest(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length === 0 || trimmed.length > 600 || trimmed.endsWith("?")) return false;
   if (trimmed.endsWith(":")) return true;
-  return /\b(?:I'll|I will|I'm going to|let me(?! know)|delegating|dispatching|dispatched|spawning|launching)\b/i.test(trimmed);
+  return /\b(?:I'll|I will|I'm going to|let me(?! know)|now \w+ing|delegating|dispatching|dispatched|spawning|launching)\b/i.test(trimmed);
 }
 
 export function renderToolResultBlocks(messages: ChatMessage[], context: ChatMessage[] = messages): string {

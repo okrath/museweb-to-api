@@ -26,6 +26,8 @@ describe("tool prompt protocol", () => {
     expect(announcesWithoutRequest("Delegating both lookups to two parallel read-only subagents.")).toBe(true);
     expect(announcesWithoutRequest("Two lookups dispatched in parallel. I'll report back once both come in.")).toBe(true);
     expect(announcesWithoutRequest("Let me check the config.")).toBe(true);
+    expect(announcesWithoutRequest("The edit applied cleanly; now running the test to confirm.")).toBe(true);
+    expect(announcesWithoutRequest("Nothing to do now: everything passes.")).toBe(false);
     expect(announcesWithoutRequest("3.4.5")).toBe(false);
     expect(announcesWithoutRequest("Done. Let me know if you need anything else.")).toBe(false);
     expect(announcesWithoutRequest("Should I delete the old file as well?")).toBe(false);
