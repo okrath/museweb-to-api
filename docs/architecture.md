@@ -55,7 +55,9 @@ Fastify gateway (src/server.ts)
    the complete Markdown at `done` (tools are shown to Muse as `POST /api/<tool name>` endpoints
    and `prompt/tool-protocol.ts#toolName` maps a request back). A reply with no call that only
    announces one (`announcesWithoutRequest`) gets one `missingRequestNudge` turn in the same
-   thread before the router emits cleaned text, function-call events, and a
+   thread; a finished answer to a task in a conversation that never ran a request
+   (`taskWithoutAnyRequest`) gets one buffered `noRequestYetNudge` turn whose reply is kept only
+   when it requests something. Then the router emits cleaned text, function-call events, and a
    `tool_use` stop reason. A resumed turn, or a turn using a warm side chat, is held back until
    its first content delta; if it fails before that (for example the Muse
    chat no longer opens) the router deletes the dead session or warm entry and reruns the request

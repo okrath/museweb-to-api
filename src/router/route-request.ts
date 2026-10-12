@@ -105,6 +105,9 @@ async function runOnce(
       announced ? "Muse announced an action without a request; nudging once" : "Muse answered a task without any request; nudging once",
     );
     await runDriverTurn(turn, announced ? missingRequestNudge : noRequestYetNudge, outcome.conversationId, announced ? "loud" : "quiet");
+  } else if (first.nudge) {
+    // No thread to nudge in (or the client left): end the held-back turn as it was.
+    forward({ type: "done", stopReason: "end_turn" });
   }
   return { outcome, held };
 }

@@ -313,6 +313,23 @@ describe("gateway", () => {
     expect(gateway.driver.calls).toHaveLength(2);
   });
 
+  it("still ends the turn when there is no thread to nudge in", async () => {
+    const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["Now I'll read the file through the API:"], conversationId: "" });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", stream: true, messages: [{ role: "user", content: "Read a.txt" }], tools: [definition] },
+    });
+    expect(response.statusCode).toBe(200);
+    const chunks = parseSse(response.payload)
+      .filter((frame) => frame.data !== "[DONE]")
+      .map((frame) => JSON.parse(frame.data) as { choices: Array<{ finish_reason: string | null }> });
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("stop");
+    expect(gateway.driver.calls).toHaveLength(1);
+  });
+
   it("does not nudge a plain final answer", async () => {
     const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
     gateway.driver.enqueue({ chunks: ["The version is 3.4.5."] });
