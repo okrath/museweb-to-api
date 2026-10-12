@@ -1,14 +1,24 @@
 import type { Locator, Page } from "playwright";
 import { ThreadDeleteRefusedError, type CleanThreadsResult } from "../core/types.js";
 import { threadRowsScript, type ThreadRow } from "./page-scripts.js";
-import { conversationIdFromUrl, mainChatRowPattern, selectors, threadDeleteFailedPattern, threadDeleteItemPattern } from "./selectors.js";
+import {
+  conversationIdFromUrl,
+  mainChatRowPattern,
+  selectors,
+  threadDeletedPattern,
+  threadDeleteFailedPattern,
+  threadDeleteItemPattern,
+} from "./selectors.js";
 
 const HOVER_RETRIES = 10;
 const HOVER_RETRY_MS = 400;
-const AFTER_DELETE_WAIT_MS = 700;
 const ACTIVE_ROW_SETTLE_MS = 3_000;
-const ROW_DROP_WAIT_MS = 5_000;
+const TOAST_WAIT_MS = 5_000;
+const TOAST_CLEAR_MS = 8_000;
+const SEEN_TOAST_ATTRIBUTE = "data-mta-seen-toast";
 const NETWORK_SETTLE_MS = 3_000;
+const DELETE_SETTLE_MS = 4_000;
+const DELETE_ATTEMPTS = 3;
 
 async function sideRows(page: Page): Promise<ThreadRow[]> {
   const rows = await page.evaluate(threadRowsScript, { row: selectors.threadRow });
@@ -38,58 +48,11 @@ export async function deleteSideThread(page: Page, target: ThreadRow): Promise<v
   }
 
   await row.scrollIntoViewIfNeeded().catch(() => undefined);
-  const menuButton = await revealRowMenuButton(page, row);
-  if (!menuButton) throw new Error(`"More thread actions" never became visible for "${target.text}"`);
-  await menuButton.click();
-
-  const deleteItem = page.locator('[role="menuitem"]', { hasText: threadDeleteItemPattern }).first();
-  if (!(await deleteItem.isVisible().catch(() => false))) {
-    await page.keyboard.press("Escape").catch(() => undefined);
-    throw new Error(`Delete menu item not found for "${target.text}"`);
-  }
-  const before = (await sideRows(page)).length;
-  await deleteItem.click();
-  await page.waitForTimeout(400);
-
-  // Wait up to 2.5s for the delete confirm dialog button
-  const confirmButton = page
-    .locator(selectors.threadDeleteConfirmDialog.join(","))
-    .locator("button")
-    .filter({ hasText: /delete/i })
-    .first();
-
-  const hasConfirm = await confirmButton.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false);
-  if (hasConfirm) {
-    await confirmButton.click();
-  } else {
-    const fallbackDeleteButton = page.locator("button").filter({ hasText: /^delete$/i }).first();
-    if (await fallbackDeleteButton.isVisible().catch(() => false)) {
-      await fallbackDeleteButton.click();
-    }
-  }
-
-  // Wait for deletion animation and DOM update
-  await page.waitForTimeout(AFTER_DELETE_WAIT_MS);
-
-  // Poll up to 4s to verify the item is gone
-  const deadline = Date.now() + 4000;
-  while (Date.now() < deadline) {
-    const rows = await sideRows(page);
-    const gone = target.href
-      ? !rows.some((r) => r.href === target.href)
-      : rows.length < before || rows[0]?.text !== target.text || !rows.some((r) => r.text === target.text);
-    if (gone) return;
-    await page.waitForTimeout(350);
-  }
-
-  const finalRows = await sideRows(page);
-  const stillThere = target.href
-    ? finalRows.some((r) => r.href === target.href)
-    : finalRows.some((r) => r.text === target.text) && finalRows.length >= before;
-  if (stillThere) {
-    throw new Error(`thread "${target.text}" (${target.href ?? "no-href"}) is still present after delete confirm`);
-  }
+  // Titles repeat and the virtualised panel refills from below, so only Muse's toast proves it.
+  const verdict = await deleteViaMenu(page, row, `"${target.text}"`);
+  if (verdict !== "deleted") throw new Error(`Muse never confirmed deleting "${target.text}"`);
 }
+
 export interface ThreadDeletionCheck {
   currentUrl: string;
   targetUrl: string;
@@ -107,6 +70,70 @@ export function isThreadDeleted(check: ThreadDeletionCheck): boolean {
   const current = conversationIdFromUrl(check.currentUrl, check.museUrl);
   const target = conversationIdFromUrl(check.targetUrl, check.museUrl);
   return current !== target || !check.activeRowPresent;
+}
+
+type DeleteVerdict = "deleted" | "refused" | "unknown";
+
+/** Opens the row's menu, chooses Delete, confirms, and reads Muse's toast. */
+async function clickDelete(page: Page, row: Locator, label: string): Promise<{ verdict: DeleteVerdict; toast: string }> {
+  // A toast left over from the previous delete would otherwise be read as this one's answer, so
+  // every toast already on the page is marked and only unmarked ones count below.
+  const existing = page.locator(selectors.toast.join(","));
+  await existing.first().waitFor({ state: "hidden", timeout: TOAST_CLEAR_MS }).catch(() => undefined);
+  await existing.evaluateAll((nodes, attribute) => nodes.forEach((node) => node.setAttribute(attribute, "")), SEEN_TOAST_ATTRIBUTE);
+  const toasts = page.locator(selectors.toast.map((selector) => `${selector}:not([${SEEN_TOAST_ATTRIBUTE}])`).join(","));
+  const menuButton = await revealRowMenuButton(page, row);
+  if (!menuButton) throw new Error(`"More thread actions" never became visible for ${label}`);
+  await menuButton.click();
+
+  const deleteItem = page.locator('[role="menuitem"]', { hasText: threadDeleteItemPattern }).first();
+  if (!(await deleteItem.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false))) {
+    await page.keyboard.press("Escape").catch(() => undefined);
+    throw new Error(`Delete menu item not found for ${label}`);
+  }
+  await deleteItem.click();
+
+  const confirmButton = page.locator(selectors.threadDeleteConfirmDialog.join(",")).first().locator("button").filter({ hasText: /delete/i }).first();
+  if (await confirmButton.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false)) {
+    await confirmButton.click();
+  } else {
+    // A dialog outside `threadDeleteConfirmDialog` still has its plain "Delete" button.
+    const fallback = page.locator("button").filter({ hasText: /^delete$/i }).first();
+    if (!(await fallback.isVisible().catch(() => false))) {
+      throw new Error(`Delete confirmation dialog button not found for ${label}`);
+    }
+    await fallback.click();
+  }
+
+  // Muse answers with a toast either way; it only stays a few seconds, so poll for it.
+  const refused = toasts.filter({ hasText: threadDeleteFailedPattern }).first();
+  const deleted = toasts.filter({ hasText: threadDeletedPattern }).first();
+  const deadline = Date.now() + TOAST_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (await deleted.isVisible().catch(() => false)) return { verdict: "deleted", toast: "" };
+    if (await refused.isVisible().catch(() => false)) {
+      return { verdict: "refused", toast: (await refused.innerText().catch(() => "")).replace(/\s+/g, " ").trim() };
+    }
+    await page.waitForTimeout(250);
+  }
+  return { verdict: "unknown", toast: "" };
+}
+
+/**
+ * Deletes one row through its menu. The panel shows rows from cache before the page's link to
+ * Muse is up, and a delete sent before that is refused with "Failed to delete side chat" (live
+ * 2026-10-12: always at 0 and 1.5 s after load, never at 4 s), so callers wait
+ * `DELETE_SETTLE_MS` after loading a page and a refusal is retried after another pause.
+ */
+async function deleteViaMenu(page: Page, row: Locator, label: string): Promise<DeleteVerdict> {
+  let toast = "";
+  for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
+    const result = await clickDelete(page, row, label);
+    if (result.verdict !== "refused") return result.verdict;
+    toast = result.toast;
+    if (attempt < DELETE_ATTEMPTS) await page.waitForTimeout(DELETE_SETTLE_MS);
+  }
+  throw new ThreadDeleteRefusedError(`Muse refused to delete ${label}: "${toast}"`);
 }
 
 /**
@@ -142,48 +169,12 @@ export async function deleteThreadAt(
   if (!(await activeRow.isVisible().catch(() => false))) {
     throw new Error(`Active thread row not visible in side panel for ${url}`);
   }
-
   const title = (await activeRow.innerText().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 80);
 
-  const menuButton = await revealRowMenuButton(page, activeRow);
-  if (!menuButton) {
-    throw new Error(`"More thread actions" never became visible for active thread at ${url}`);
-  }
-  await menuButton.click();
-
-  const deleteItem = page.locator('[role="menuitem"]', { hasText: threadDeleteItemPattern }).first();
-  const deleteItemVisible = await deleteItem.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false);
-  if (!deleteItemVisible) {
-    await page.keyboard.press("Escape").catch(() => undefined);
-    throw new Error(`Delete menu item not found for active thread at ${url}`);
-  }
-  await deleteItem.click();
-
-  // Wait for the delete confirm dialog and its confirm button
-  const confirmDialog = page.locator(selectors.threadDeleteConfirmDialog.join(",")).first();
-  const confirmButton = confirmDialog.locator("button").filter({ hasText: /delete/i }).first();
-  const hasConfirm = await confirmButton.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false);
-  if (!hasConfirm) {
-    throw new Error(`Delete confirmation dialog button not found for active thread at ${url}`);
-  }
-  const rowsBefore = (await sideRows(page)).length;
-  await confirmButton.click();
-
-  // Muse sometimes refuses a delete and only says so in a "Failed to delete side chat" toast (seen
-  // live from 2026-10-11 on fresh and hours-old chats alike, for hours on end), so wait for the
-  // panel to drop the row and report the toast otherwise; the reaper then stops tracking the chat.
-  const refusal = page.locator(selectors.toast.join(",")).filter({ hasText: threadDeleteFailedPattern }).first();
-  const deadline = Date.now() + ROW_DROP_WAIT_MS;
-  while (Date.now() < deadline) {
-    if ((await sideRows(page)).length < rowsBefore) break;
-    // The toast only stays a few seconds, so look for it while waiting.
-    if (await refusal.isVisible().catch(() => false)) {
-      const text = (await refusal.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-      throw new ThreadDeleteRefusedError(`Muse refused to delete ${url}: "${text}"`);
-    }
-    await page.waitForTimeout(250);
-  }
-  if ((await sideRows(page)).length >= rowsBefore) throw new Error(`Muse kept the thread at ${url}`);
+  await page.waitForTimeout(DELETE_SETTLE_MS);
+  // The row count says nothing about success: the virtualised panel refills from below. The
+  // reload below decides.
+  await deleteViaMenu(page, activeRow, url);
   // Navigating away before the delete request finishes would cancel it.
   await page.waitForLoadState("networkidle", { timeout: NETWORK_SETTLE_MS }).catch(() => undefined);
 
@@ -235,6 +226,7 @@ export async function deleteAllSideThreads(
   onProgress?: (progress: { deleted: number; totalKnown: number; title: string }) => void,
 ): Promise<CleanThreadsResult> {
   await ensureThreadPanelOpen(page);
+  await page.waitForTimeout(DELETE_SETTLE_MS);
   const titles: string[] = [];
   const failedKeys = new Set<string>();
 
@@ -266,6 +258,8 @@ export async function deleteAllSideThreads(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`Attempt ${attempt} to delete "${target.text}" failed: ${msg}`);
+        // deleteViaMenu already retried the refusal; more attempts would only repeat it.
+        if (err instanceof ThreadDeleteRefusedError) break;
         await page.keyboard.press("Escape").catch(() => undefined);
         await page.waitForTimeout(600);
         // Recheck if it got removed despite the error

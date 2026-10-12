@@ -100,8 +100,10 @@ export const threadUrlPattern = /\/thread\/(?!new$)[^/?#]+/;
 export const threadDeleteItemPattern = /^delete$/i;
 /** Identifies the confirm dialog among other dialogs by its own text. */
 export const threadDeleteConfirmPattern = /delete/i;
-/** Toast Muse shows when it refuses a delete; a later retry usually succeeds. Seen 2026-10-11. */
+/** Toast Muse shows when it refuses a delete, e.g. one sent right after the page loaded. Seen 2026-10-11. */
 export const threadDeleteFailedPattern = /failed to delete/i;
+/** Toast Muse shows once a delete went through. Seen 2026-10-12. */
+export const threadDeletedPattern = /side chat deleted/i;
 /**
  * The dock menu item that opens Settings. Its accessible text runs the "Ctrl+," shortcut hint
  * straight into the label with no separating whitespace, so this must not end on a `\b`.
