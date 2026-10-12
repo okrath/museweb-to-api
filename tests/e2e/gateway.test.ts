@@ -336,7 +336,7 @@ describe("gateway", () => {
   it("keeps the original answer when the quiet nudge finds nothing to request", async () => {
     const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
     gateway.driver.enqueue({ chunks: ["A list is ordered; a set is not."] });
-    gateway.driver.enqueue({ chunks: ["OK"] });
+    gateway.driver.enqueue({ chunks: ["OK, no request needed."] });
     const response = await gateway.app.inject({
       method: "POST",
       url: "/v1/chat/completions",

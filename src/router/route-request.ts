@@ -66,6 +66,11 @@ interface TurnOutcome {
 export const unverifiedAnswerNotice =
   "Muse answered without sending any request to this app, so nothing was read, changed or run on your machine. Its answer describes work done elsewhere and was withheld. Ask again or rephrase the task.";
 
+/** The nudge asks for only "OK" when no request is needed; a short "OK, none needed." counts too. */
+function noRequestNeeded(reply: string): boolean {
+  return reply.length <= 60 && /^ok\b/i.test(reply);
+}
+
 function createToolCallId(): string {
   return `call_${randomBytes(18).toString("base64url")}`;
 }
@@ -195,7 +200,7 @@ async function runDriverTurn(
           if (kind === "quiet" && calls.length === 0) {
             // "OK" means no request was needed and the held answer stands. Anything else means
             // Muse still claims work that never ran on the client, so the client is told that.
-            const text = /^ok\W*$/i.test(parsed.text) ? textBefore : unverifiedAnswerNotice;
+            const text = noRequestNeeded(parsed.text) ? textBefore : unverifiedAnswerNotice;
             if (text !== textBefore) deps.log.warn({ requestId: req.requestId }, "Muse still sent no request after the nudge; answer withheld");
             outcome.text = text;
             sendToolText(text);
