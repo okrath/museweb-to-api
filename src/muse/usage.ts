@@ -1,6 +1,6 @@
 import type { Locator, Page } from "playwright";
 import type { UsageReport } from "../core/types.js";
-import { TurnError, waitForComposer, type DriverContext } from "./page-driver.js";
+import { TurnError, waitForComposer, type DriverContext } from "./page-context.js";
 import { usageScript } from "./page-scripts.js";
 import { selectors, settingsMenuItemPattern } from "./selectors.js";
 

@@ -11,7 +11,11 @@ Fastify gateway (src/server.ts)
   ├─ cache/        exact-match response cache                      (JSON file)
   └─ muse/         Playwright driver over one persistent Chromium profile
                      ├─ browser.ts      profile + tab pool
-                     ├─ page-driver.ts  open chat → pick mode → type → send → read reply
+                     ├─ page-driver.ts  MuseDriver: tabs, turns, usage, thread deletion
+                     ├─ turn.ts         one turn: open chat → pick mode → type → send → read reply
+                     ├─ composer.ts     open chat, mode, prompt, attachments, send
+                     ├─ new-thread.ts   find the side chat `/thread/new` created
+                     ├─ page-context.ts TurnError, DriverContext, waitForComposer
                      ├─ page-scripts.ts code that runs inside the page
                      ├─ turn-reader.ts  pure streaming / completion rules
                      ├─ selectors.ts    every DOM assumption
@@ -76,7 +80,7 @@ profile holds the Muse sign-in created by `pnpm muse:login`; the gateway never h
 Up to `MAX_CONCURRENT_TURNS` tabs share it. A resumed turn prefers a tab already parked on that
 conversation URL, avoiding a navigation.
 
-`muse/page-driver.ts#executeTurn` performs one turn:
+`muse/turn.ts#executeTurn` performs one turn:
 
 1. Navigate to the conversation URL (a Muse side chat, `/thread/<id>`) or to `/thread/new` for a
    new conversation, and wait for the composer. Landing on `auth.muse.ai` or `facebook.com`, or on

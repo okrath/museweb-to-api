@@ -38,7 +38,8 @@ src/
   sessions/  cache/    JSON-backed stores
   store/json-store.ts  atomic debounced JSON map
   prompt/              transcript rendering
-  muse/                browser, page-driver, page-scripts, turn-reader, selectors, markdown, login, probe
+  muse/                browser, page-driver, turn, composer, new-thread, page-context, page-scripts,
+                       turn-reader, selectors, markdown, thread-cleanup, usage, login, probe
 tests/                 vitest: protocol, stores, reader logic, HTTP e2e with the fake driver
 docs/                  architecture, driver calibration
 ```

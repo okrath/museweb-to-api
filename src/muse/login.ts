@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { GatewayConfig } from "../config.js";
 import { MuseBrowser } from "./browser.js";
-import { waitForComposer } from "./page-driver.js";
+import { waitForComposer } from "./page-context.js";
 import { isSignedInUrl } from "./selectors.js";
 
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
