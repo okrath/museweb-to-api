@@ -281,6 +281,38 @@ describe("gateway", () => {
     expect(gateway.driver.calls[1]?.conversationId).toMatch(/^https:\/\/muse\.ai\/c\//);
   });
 
+  it("nudges quietly when a task gets a finished answer before any request ran", async () => {
+    const definition = { type: "function", function: { name: "write_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["ALL PASS"] });
+    gateway.driver.enqueue({ chunks: ['```json\n{"endpoint":"/api/write_file","body":{"path":"stats.js"}}\n```'] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "Create stats.js and run its test" }], tools: [definition] },
+    });
+    const choice = response.json().choices[0];
+    expect(choice.finish_reason).toBe("tool_calls");
+    expect(choice.message.tool_calls[0].function.name).toBe("write_file");
+    expect(gateway.driver.calls[1]?.prompt).toContain("No request has been sent to the app");
+  });
+
+  it("keeps the original answer when the quiet nudge finds nothing to request", async () => {
+    const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["A list is ordered; a set is not."] });
+    gateway.driver.enqueue({ chunks: ["OK"] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "Check: how does a list differ from a set?" }], tools: [definition] },
+    });
+    const choice = response.json().choices[0];
+    expect(choice.message.content).toBe("A list is ordered; a set is not.");
+    expect(choice.finish_reason).toBe("stop");
+    expect(gateway.driver.calls).toHaveLength(2);
+  });
+
   it("does not nudge a plain final answer", async () => {
     const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
     gateway.driver.enqueue({ chunks: ["The version is 3.4.5."] });
@@ -395,6 +427,7 @@ describe("gateway", () => {
     expect(first.json().stop_reason).toBe("tool_use");
     expect(first.json().content[0]).toMatchObject({ type: "tool_use", name: "read_file", input: { path: "a.txt" } });
     const callsAfterFirst = gateway.driver.calls.length;
+    gateway.driver.enqueue({ chunks: ['```\n{"name":"read_file","arguments":{"path":"a.txt"}}\n```'] });
     const second = await gateway.app.inject({
       method: "POST",
       url: "/v1/messages",

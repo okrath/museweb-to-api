@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../../src/core/types.js";
-import { announcesWithoutRequest, createToolTextFilter, parseToolCalls, renderToolProtocol, renderToolResults, toolName } from "../../src/prompt/tool-protocol.js";
+import { announcesWithoutRequest, createToolTextFilter, parseToolCalls, taskWithoutAnyRequest, renderToolProtocol, renderToolResults, toolName } from "../../src/prompt/tool-protocol.js";
 
 const tools = [
   { name: "read_file", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } } } },
@@ -32,6 +32,20 @@ describe("tool prompt protocol", () => {
     expect(announcesWithoutRequest("Done. Let me know if you need anything else.")).toBe(false);
     expect(announcesWithoutRequest("Should I delete the old file as well?")).toBe(false);
     expect(announcesWithoutRequest(`I'll summarise: ${"x".repeat(700)}`)).toBe(false);
+  });
+
+  it("doubts a finished answer only for a task in a conversation that never ran a request", () => {
+    const task: ChatMessage[] = [{ role: "user", content: "Create stats.js and run the test" }];
+    expect(taskWithoutAnyRequest(task)).toBe(true);
+    expect(taskWithoutAnyRequest([{ role: "user", content: "What is the capital of France?" }])).toBe(false);
+    expect(
+      taskWithoutAnyRequest([
+        ...task,
+        { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "write_file", argumentsJson: "{}" }] },
+        { role: "tool", content: "ok", toolCallId: "c1" },
+        { role: "user", content: "Now run it again" },
+      ]),
+    ).toBe(false);
   });
 
   it("maps an endpoint back to its tool name", () => {

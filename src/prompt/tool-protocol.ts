@@ -98,6 +98,24 @@ export function announcesWithoutRequest(text: string): boolean {
   return /\b(?:I'll|I will|I'm going to|let me(?! know)|now \w+ing|delegating|dispatching|dispatched|spawning|launching)\b/i.test(trimmed);
 }
 
+/** Sent when a task got a finished answer although no request has ever run in the conversation. */
+export const noRequestYetNudge =
+  "No request has been sent to the app in this conversation yet, so nothing has been read, changed or run on the end user's machine. Anything done on your own machine does not reach it. If the task needs the end user's files or commands, send the request block(s) now. If it needs none, reply with only: OK";
+
+const taskVerbs =
+  /\b(?:create|write|add|append|edit|modify|change|update|fix|refactor|rename|move|delete|remove|run|test|build|install|read|open|find|search|grep|list|count|check|inspect|implement|delegate)\b/i;
+
+/**
+ * Whether a no-request answer must be doubted: the client has never sent a function result in
+ * this conversation, yet the newest user message asks for work. Muse sometimes does such a task
+ * on its own machine and reports the result ("ALL PASS" with no file created, 2026-10-12).
+ */
+export function taskWithoutAnyRequest(messages: ChatMessage[]): boolean {
+  if (messages.some((message) => message.role === "tool")) return false;
+  const lastUser = [...messages].reverse().find((message) => message.role === "user");
+  return lastUser !== undefined && taskVerbs.test(lastUser.content);
+}
+
 export function renderToolResultBlocks(messages: ChatMessage[], context: ChatMessage[] = messages): string {
   const names = new Map<string, string>();
   for (const message of context) {

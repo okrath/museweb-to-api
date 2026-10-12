@@ -3,7 +3,13 @@ import type { Logger } from "pino";
 import { cacheKey, replayCachedEvents, type ResponseCache } from "../cache/response-cache.js";
 import type { GatewayConfig } from "../config.js";
 import type { ChatMessage, ChatRequest, MuseDriver, MuseMode, ToolCall, TurnEvent } from "../core/types.js";
-import { announcesWithoutRequest, createToolTextFilter, missingRequestNudge } from "../prompt/tool-protocol.js";
+import {
+  announcesWithoutRequest,
+  createToolTextFilter,
+  missingRequestNudge,
+  noRequestYetNudge,
+  taskWithoutAnyRequest,
+} from "../prompt/tool-protocol.js";
 import { RouteError } from "../protocol/errors.js";
 import { findModel, resolveMode } from "../protocol/models.js";
 import { fingerprint, lookupFingerprint, type SessionStore } from "../sessions/session-store.js";
@@ -89,11 +95,16 @@ async function runOnce(
   };
 
   const turn = { deps, req, mode, outcome, forward, streamed };
-  const first = await runDriverTurn(turn, prompt, conversationId, true);
-  // One nudge, in the same thread, when Muse announced an action but sent no request block.
-  if (first.announcedOnly && outcome.conversationId && !req.clientAbort.aborted) {
-    deps.log.info({ requestId: req.requestId, conversationId: outcome.conversationId }, "Muse announced an action without a request; nudging once");
-    await runDriverTurn(turn, missingRequestNudge, outcome.conversationId, false);
+  const first = await runDriverTurn(turn, prompt, conversationId, "first");
+  // One nudge, in the same thread, when a tool reply carries no request block although it
+  // either announced one or claims a finished task that never ran anything on the client.
+  if (first.nudge && outcome.conversationId && !req.clientAbort.aborted) {
+    const announced = first.nudge === "announced";
+    deps.log.info(
+      { requestId: req.requestId, conversationId: outcome.conversationId, reason: first.nudge },
+      announced ? "Muse announced an action without a request; nudging once" : "Muse answered a task without any request; nudging once",
+    );
+    await runDriverTurn(turn, announced ? missingRequestNudge : noRequestYetNudge, outcome.conversationId, announced ? "loud" : "quiet");
   }
   return { outcome, held };
 }
@@ -108,22 +119,23 @@ interface DriverTurnState {
 }
 
 /**
- * One driver turn feeding `outcome`; a second call continues the same reply. With `mayNudge`, a
- * tool reply that only announces an action holds back its `done` and returns `announcedOnly`.
+ * One driver turn feeding `outcome`. `first` may hold back its `done` and return why a nudge
+ * should follow. A `loud` nudge continues the reply as it streams; a `quiet` one is buffered and
+ * only kept when it requests something, so a nudged plain answer reaches the client unchanged.
  */
 async function runDriverTurn(
   state: DriverTurnState,
   prompt: string,
   conversationId: string | undefined,
-  mayNudge: boolean,
-): Promise<{ announcedOnly: boolean }> {
+  kind: "first" | "loud" | "quiet",
+): Promise<{ nudge?: "announced" | "unverified" }> {
   const { deps, req, mode, outcome, forward, streamed } = state;
   const now = deps.now ?? Date.now;
   if (conversationId && deps.registry) deps.registry.begin(conversationId);
   const toolFilter = req.tools && req.tools.length > 0 ? createToolTextFilter() : undefined;
   const textBefore = outcome.text;
   let separate = textBefore.length > 0;
-  let announcedOnly = false;
+  let nudge: "announced" | "unverified" | undefined;
   const sendToolText = (text: string) => {
     if (text.length === 0) return;
     const delta = separate ? `\n\n${text}` : text;
@@ -139,14 +151,14 @@ async function runDriverTurn(
         prompt,
         mode,
         conversationId,
-        attachments: mayNudge ? attachmentsForRequest(req) : undefined,
+        attachments: kind === "first" ? attachmentsForRequest(req) : undefined,
         signal: req.clientAbort,
       },
       (event) => {
         if (event.type === "text_delta") {
           if (toolFilter) {
             const safe = toolFilter.append(event.text);
-            if (req.stream) sendToolText(safe);
+            if (req.stream && kind !== "quiet") sendToolText(safe);
           } else {
             outcome.text += event.text;
             forward(event);
@@ -165,23 +177,30 @@ async function runDriverTurn(
           forward(event);
         } else if (toolFilter) {
           const parsed = toolFilter.finish();
-          outcome.text = [textBefore, parsed.text].filter((part) => part.length > 0).join("\n\n");
-          outcome.toolCalls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
-          sendToolText(req.stream ? parsed.unsentText : parsed.text);
-          for (const call of outcome.toolCalls) {
-            forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
-          }
-          if (mayNudge && !outcome.error && outcome.toolCalls.length === 0 && announcesWithoutRequest(parsed.text)) {
-            announcedOnly = true;
+          const calls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
+          if (kind === "quiet" && calls.length === 0) {
+            // The nudge found nothing to request: the original answer stands as it was.
+            forward({ type: "done", stopReason: "end_turn" });
             return;
           }
-          forward({ type: "done", stopReason: outcome.toolCalls.length > 0 ? "tool_use" : "end_turn" });
+          outcome.text = [textBefore, parsed.text].filter((part) => part.length > 0).join("\n\n");
+          outcome.toolCalls = calls;
+          sendToolText(req.stream && kind !== "quiet" ? parsed.unsentText : parsed.text);
+          for (const call of calls) {
+            forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
+          }
+          if (kind === "first" && !outcome.error && calls.length === 0 && req.toolChoice !== "none") {
+            if (announcesWithoutRequest(parsed.text)) nudge = "announced";
+            else if (parsed.text.length > 0 && taskWithoutAnyRequest(req.messages)) nudge = "unverified";
+            if (nudge) return;
+          }
+          forward({ type: "done", stopReason: calls.length > 0 ? "tool_use" : "end_turn" });
         } else {
           forward(event);
         }
       },
     );
-    return { announcedOnly };
+    return { nudge };
   } finally {
     if (conversationId && deps.registry) deps.registry.end(conversationId, now());
   }

@@ -191,6 +191,10 @@ When a reply carries no request block but only announces one ("Now I'll create b
 through the API:", "Delegating both lookups…"), the gateway sends Muse one reminder in the same
 thread and returns both parts as a single reply, so the client is not left with a promise and no
 call. Measured on 2026-10-12, such announcements came up in about one complex omp task in five.
+Muse also sometimes did a task on its own machine and reported the result ("ALL PASS" with no
+file created). So when a task gets a finished answer with no request while the conversation has
+never sent a tool result, the gateway asks Muse once more in the same thread; a reply that
+requests something is returned instead, otherwise the original answer stands unchanged.
 
 Measured on 2026-09-21, Muse requested the function in about five of six eligible turns and
 answered the rest directly from its own abilities; when a call is mandatory, send
