@@ -57,7 +57,9 @@ Fastify gateway (src/server.ts)
    an async iterable (`router/event-channel.ts`). When functions are active, the router holds text
    from the first possible fenced block (including the observed detached `json` line), parses
    the complete Markdown at `done` (tools are shown to Muse as `POST /api/<tool name>` endpoints
-   and `prompt/tool-protocol.ts#toolName` maps a request back). A reply with no call that only
+   and `prompt/tool-protocol.ts#toolName` maps a request back; the protocol and its reminder tell
+   Muse that a client may run the requests of one reply concurrently, so a request that needs
+   another's result goes in a later reply). A reply with no call that only
    announces one (`announcesWithoutRequest`) gets one `missingRequestNudge` turn in the same
    thread; a finished answer to a task in a conversation that never ran a request
    (`taskWithoutAnyRequest`) gets one buffered `noRequestYetNudge` turn whose reply is kept only

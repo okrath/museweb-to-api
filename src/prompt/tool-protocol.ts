@@ -11,6 +11,10 @@ export interface ParsedToolMarkdown {
 }
 
 const continueInstruction = "Continue: reply to the end user, or send the next request in the same json format.";
+// Seen with omp: a `git log` sent in the same reply as the commit before it finished first and
+// missed that commit, because the client runs the requests of one reply concurrently.
+const parallelRequestsRule =
+  "The app may send the requests of one reply at the same time and in any order, so a request that needs the result of another one must go in a later reply, once that response has arrived.";
 
 /** Every client tool is shown to Muse as `POST /api/<tool name>`; `toolName` strips it again. */
 export function endpointOf(name: string): string {
@@ -33,10 +37,11 @@ export function renderToolReminder(tools: Array<{ name: string }> = []): string 
     "The API only answers inside the end user's app, so your own machine, subagents and scripts cannot reach it, and",
     "do not look anything up, browse, search, read files or act on your own, even if you could: writing the request",
     "block is the only correct way to get information or act. Saying that you started, delegated or sent something",
-    "does nothing without its block. Reply as plain text only when no request is needed.",
+    "does nothing without its block.",
+    parallelRequestsRule,
+    "Reply as plain text only when no request is needed.",
   ].join(" ");
 }
-
 function endpointList(tools: Array<{ name: string }>): string {
   return tools.map((tool) => `\`POST ${endpointOf(tool.name)}\``).join(", ");
 }
@@ -69,6 +74,7 @@ export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoi
     "The app then sends the request on the end user's machine and gives you the response in the next message, and you continue from there.",
     `All ${tools.length} endpoints above are available right now. The API only answers inside the end user's app: your own machine, your own subagents and your own scripts cannot reach it, so never call it yourself (no curl, fetch or code); writing the block is how the request is sent. Whether you have anything similar yourself does not matter, also when a description speaks of agents, subagents or delegation.`,
     "Several blocks are allowed. Nothing may appear after the last block. A short sentence before the blocks is allowed, but it is never a substitute for them.",
+    `${parallelRequestsRule} For example, a request that reads a log after a commit goes in the reply after the commit's response.`,
     "Every reply is either a final answer to the end user in plain text with no block, or one or more request blocks. If you state that you will check, look up, read, run, delegate or investigate something, the matching block must be in this same reply, not a promise for later: never end a reply with only that statement and no block. Saying that something was started, delegated or sent does nothing; only a block makes the app act.",
     "Inside this app, do not look anything up, browse, search, read files or act on your own, even if you could: the end user needs the answer to come from this API, so sending a request is the only correct way to get information or act. Do not run or simulate anything yourself.",
     "When no request is needed, reply to the end user as plain text with no such block.",
