@@ -76,6 +76,8 @@ export type TurnTrace = (entry: TurnTraceEntry) => void;
 export interface DriverContext {
   config: Pick<GatewayConfig, "museUrl" | "requestTimeoutSec" | "stallTimeoutSec">;
   log: Pick<Logger, "debug" | "info" | "warn" | "error">;
+  /** Whether another gateway tab has this conversation open; such a thread is never a new one. */
+  openElsewhere?: (page: Page, conversationId: string) => boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -328,6 +330,14 @@ async function openRowWithPrompt(
   await page.waitForURL((url) => threadUrlPattern.test(url.pathname), { timeout: 10_000 }).catch(() => undefined);
   const landed = conversationIdFromUrl(page.url(), ctx.config.museUrl);
   if (!landed) return undefined;
+  // A thread busy in another tab jumps to the top of the panel exactly like a new one, and its
+  // transcript passes the prompt check (all its messages are unseen here and every omp request
+  // starts with the same system prompt). Claiming it cut that tab's reply short and filed a used
+  // conversation as a clean warm thread (seen live 2026-10-12).
+  if (ctx.openElsewhere?.(page, landed)) {
+    trace?.({ at: Date.now(), stage: "thread_skipped", note: `${landed} is open in another tab` });
+    return undefined;
+  }
   for (let attempt = 0; attempt < THREAD_LOAD_ATTEMPTS; attempt++) {
     if (attempt > 0) await page.goto(landed, { waitUntil: "domcontentloaded" });
     await waitForComposer(page, ctx.config.museUrl);
@@ -607,7 +617,11 @@ export function createMuseDriver(options: MuseDriverOptions): BrowserMuseDriver 
       slowSnapshotMs: config.slowSnapshotMs,
       log,
     });
-  const ctx: DriverContext = { config, log };
+  const ctx: DriverContext = {
+    config,
+    log,
+    openElsewhere: (page, conversationId) => browser.conversationOpenElsewhere(page, conversationId, config.museUrl),
+  };
 
   async function acquire(conversationId: string | undefined): Promise<Page> {
     if (conversationId) {

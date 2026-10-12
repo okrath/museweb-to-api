@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../../src/core/types.js";
-import { createToolTextFilter, parseToolCalls, renderToolProtocol, renderToolResults, toolName } from "../../src/prompt/tool-protocol.js";
+import { announcesWithoutRequest, createToolTextFilter, parseToolCalls, renderToolProtocol, renderToolResults, toolName } from "../../src/prompt/tool-protocol.js";
 
 const tools = [
   { name: "read_file", description: "Read a file", parameters: { type: "object", properties: { path: { type: "string" } } } },
@@ -19,6 +19,17 @@ describe("tool prompt protocol", () => {
     expect(prompt).toContain("Your reply must send at least one request.");
     expect(renderToolProtocol(tools, { name: "write_file" })).toContain("Your reply must send a request to `POST /api/write_file`.");
     expect(prompt.toLowerCase()).not.toMatch(/\btool\b|tool_call|channel|computer|execute/);
+  });
+
+  it("recognises a reply that announces an action instead of answering", () => {
+    expect(announcesWithoutRequest("Now I'll create both files through the API:")).toBe(true);
+    expect(announcesWithoutRequest("Delegating both lookups to two parallel read-only subagents.")).toBe(true);
+    expect(announcesWithoutRequest("Two lookups dispatched in parallel. I'll report back once both come in.")).toBe(true);
+    expect(announcesWithoutRequest("Let me check the config.")).toBe(true);
+    expect(announcesWithoutRequest("3.4.5")).toBe(false);
+    expect(announcesWithoutRequest("Done. Let me know if you need anything else.")).toBe(false);
+    expect(announcesWithoutRequest("Should I delete the old file as well?")).toBe(false);
+    expect(announcesWithoutRequest(`I'll summarise: ${"x".repeat(700)}`)).toBe(false);
   });
 
   it("maps an endpoint back to its tool name", () => {

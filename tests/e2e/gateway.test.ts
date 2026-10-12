@@ -261,6 +261,39 @@ describe("gateway", () => {
     expect(frames.at(-1)).toBe("[DONE]");
   });
 
+  it("nudges once in the same thread when Muse only announces an action", async () => {
+    const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["Now I'll read the file through the API:"] });
+    gateway.driver.enqueue({ chunks: ['```json\n{"endpoint":"/api/read_file","body":{"path":"a.txt"}}\n```'] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "Read a.txt" }], tools: [definition] },
+    });
+    expect(response.statusCode).toBe(200);
+    const message = response.json().choices[0].message;
+    expect(message.content).toBe("Now I'll read the file through the API:");
+    expect(message.tool_calls[0].function).toEqual({ name: "read_file", arguments: '{"path":"a.txt"}' });
+    expect(response.json().choices[0].finish_reason).toBe("tool_calls");
+    expect(gateway.driver.calls).toHaveLength(2);
+    expect(gateway.driver.calls[1]?.prompt).toContain("contained no request block");
+    expect(gateway.driver.calls[1]?.conversationId).toMatch(/^https:\/\/muse\.ai\/c\//);
+  });
+
+  it("does not nudge a plain final answer", async () => {
+    const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["The version is 3.4.5."] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "Which version?" }], tools: [definition] },
+    });
+    expect(response.json().choices[0].message.content).toBe("The version is 3.4.5.");
+    expect(gateway.driver.calls).toHaveLength(1);
+  });
+
   it("resumes a tool-call conversation with tool results", async () => {
     const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
     gateway.driver.enqueue({ chunks: ['```json\n{"name":"read_file","arguments":{"path":"a.txt"}}\n```'] });

@@ -3,7 +3,7 @@ import type { Logger } from "pino";
 import { cacheKey, replayCachedEvents, type ResponseCache } from "../cache/response-cache.js";
 import type { GatewayConfig } from "../config.js";
 import type { ChatMessage, ChatRequest, MuseDriver, MuseMode, ToolCall, TurnEvent } from "../core/types.js";
-import { createToolTextFilter } from "../prompt/tool-protocol.js";
+import { announcesWithoutRequest, createToolTextFilter, missingRequestNudge } from "../prompt/tool-protocol.js";
 import { RouteError } from "../protocol/errors.js";
 import { findModel, resolveMode } from "../protocol/models.js";
 import { fingerprint, lookupFingerprint, type SessionStore } from "../sessions/session-store.js";
@@ -74,15 +74,12 @@ async function runOnce(
   emit: (event: TurnEvent) => void,
   holdUntilContent: boolean,
 ): Promise<{ outcome: TurnOutcome; held: TurnEvent[] }> {
-  const now = deps.now ?? Date.now;
-  if (conversationId && deps.registry) deps.registry.begin(conversationId);
   const outcome: TurnOutcome = { text: "", thinking: "", toolCalls: [], conversationId };
   const held: TurnEvent[] = [];
-  const toolFilter = req.tools && req.tools.length > 0 ? createToolTextFilter() : undefined;
-  let streamedToolText = "";
+  const streamed = { text: "" };
   const forward = (event: TurnEvent) => {
     const hasContent =
-      outcome.text.length > 0 || outcome.thinking.length > 0 || outcome.toolCalls.length > 0 || streamedToolText.length > 0;
+      outcome.text.length > 0 || outcome.thinking.length > 0 || outcome.toolCalls.length > 0 || streamed.text.length > 0;
     if (holdUntilContent && !hasContent) {
       held.push(event);
       return;
@@ -91,17 +88,65 @@ async function runOnce(
     emit(event);
   };
 
+  const turn = { deps, req, mode, outcome, forward, streamed };
+  const first = await runDriverTurn(turn, prompt, conversationId, true);
+  // One nudge, in the same thread, when Muse announced an action but sent no request block.
+  if (first.announcedOnly && outcome.conversationId && !req.clientAbort.aborted) {
+    deps.log.info({ requestId: req.requestId, conversationId: outcome.conversationId }, "Muse announced an action without a request; nudging once");
+    await runDriverTurn(turn, missingRequestNudge, outcome.conversationId, false);
+  }
+  return { outcome, held };
+}
+
+interface DriverTurnState {
+  deps: RouteDeps;
+  req: ChatRequest;
+  mode: MuseMode;
+  outcome: TurnOutcome;
+  forward: (event: TurnEvent) => void;
+  streamed: { text: string };
+}
+
+/**
+ * One driver turn feeding `outcome`; a second call continues the same reply. With `mayNudge`, a
+ * tool reply that only announces an action holds back its `done` and returns `announcedOnly`.
+ */
+async function runDriverTurn(
+  state: DriverTurnState,
+  prompt: string,
+  conversationId: string | undefined,
+  mayNudge: boolean,
+): Promise<{ announcedOnly: boolean }> {
+  const { deps, req, mode, outcome, forward, streamed } = state;
+  const now = deps.now ?? Date.now;
+  if (conversationId && deps.registry) deps.registry.begin(conversationId);
+  const toolFilter = req.tools && req.tools.length > 0 ? createToolTextFilter() : undefined;
+  const textBefore = outcome.text;
+  let separate = textBefore.length > 0;
+  let announcedOnly = false;
+  const sendToolText = (text: string) => {
+    if (text.length === 0) return;
+    const delta = separate ? `\n\n${text}` : text;
+    separate = false;
+    streamed.text += delta;
+    forward({ type: "text_delta", text: delta });
+  };
+
   try {
     await deps.driver.runTurn(
-      { requestId: req.requestId, prompt, mode, conversationId, attachments: attachmentsForRequest(req), signal: req.clientAbort },
+      {
+        requestId: req.requestId,
+        prompt,
+        mode,
+        conversationId,
+        attachments: mayNudge ? attachmentsForRequest(req) : undefined,
+        signal: req.clientAbort,
+      },
       (event) => {
         if (event.type === "text_delta") {
           if (toolFilter) {
             const safe = toolFilter.append(event.text);
-            if (req.stream && safe.length > 0) {
-              streamedToolText += safe;
-              forward({ type: "text_delta", text: safe });
-            }
+            if (req.stream) sendToolText(safe);
           } else {
             outcome.text += event.text;
             forward(event);
@@ -120,15 +165,15 @@ async function runOnce(
           forward(event);
         } else if (toolFilter) {
           const parsed = toolFilter.finish();
-          outcome.text = parsed.text;
+          outcome.text = [textBefore, parsed.text].filter((part) => part.length > 0).join("\n\n");
           outcome.toolCalls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
-          const finalText = req.stream ? parsed.unsentText : parsed.text;
-          if (finalText.length > 0) {
-            streamedToolText += finalText;
-            forward({ type: "text_delta", text: finalText });
-          }
+          sendToolText(req.stream ? parsed.unsentText : parsed.text);
           for (const call of outcome.toolCalls) {
             forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
+          }
+          if (mayNudge && !outcome.error && outcome.toolCalls.length === 0 && announcesWithoutRequest(parsed.text)) {
+            announcedOnly = true;
+            return;
           }
           forward({ type: "done", stopReason: outcome.toolCalls.length > 0 ? "tool_use" : "end_turn" });
         } else {
@@ -136,7 +181,7 @@ async function runOnce(
         }
       },
     );
-    return { outcome, held };
+    return { announcedOnly };
   } finally {
     if (conversationId && deps.registry) deps.registry.end(conversationId, now());
   }

@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 import { chromium, type BrowserContext, type Page } from "playwright";
-import { selectors } from "./selectors.js";
+import { conversationIdFromUrl, selectors } from "./selectors.js";
 
 export interface TabReloadState {
   needsReload: boolean;
@@ -158,6 +158,13 @@ export class MuseBrowser {
   /** Tabs currently parked on a given URL, so a resumed conversation can skip navigation. */
   idlePageAt(url: string): Page | undefined {
     return this.pool.find((entry) => !entry.busy && !entry.page.isClosed() && entry.page.url().startsWith(url))?.page;
+  }
+
+  /** Whether a pooled tab other than `page` (busy or parked) currently shows this conversation. */
+  conversationOpenElsewhere(page: Page, conversationId: string, museUrl: string): boolean {
+    return this.pool.some(
+      (entry) => entry.page !== page && !entry.page.isClosed() && conversationIdFromUrl(entry.page.url(), museUrl) === conversationId,
+    );
   }
 
   async markBusy(page: Page): Promise<boolean> {

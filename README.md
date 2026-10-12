@@ -187,6 +187,11 @@ request to continue the same Muse conversation. This is prompt emulation: succes
 the model following the format, and the gateway does not perform JSON Schema validation beyond
 requiring an object for parsed arguments. Requests with active tools bypass the response cache.
 
+When a reply carries no request block but only announces one ("Now I'll create both files
+through the API:", "Delegating both lookups…"), the gateway sends Muse one reminder in the same
+thread and returns both parts as a single reply, so the client is not left with a promise and no
+call. Measured on 2026-10-12, such announcements came up in about one complex omp task in five.
+
 Measured on 2026-09-21, Muse requested the function in about five of six eligible turns and
 answered the rest directly from its own abilities; when a call is mandatory, send
 `tool_choice: "required"` (or a specific function). Muse is a personal agent with its own

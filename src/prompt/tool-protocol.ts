@@ -81,6 +81,23 @@ export function renderToolProtocol(tools: ToolDefinition[], toolChoice: ToolChoi
   return lines.join("\n");
 }
 
+/** Sent into the same thread when a reply announced an action but carried no request block. */
+export const missingRequestNudge =
+  "Your last reply said what you would do next, but it contained no request block, so the app sent nothing. Send the request block(s) now, in the same json format. If no request is needed after all, reply to the end user instead.";
+
+/**
+ * Whether a reply with no request blocks announces an action instead of answering, e.g. "Now
+ * I'll create both files through the API:" or "Delegating both lookups to two subagents." Muse
+ * did this in about one complex omp task in five (2026-10-12), and the client then stopped with
+ * nothing done. Questions and long answers are left alone.
+ */
+export function announcesWithoutRequest(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || trimmed.length > 600 || trimmed.endsWith("?")) return false;
+  if (trimmed.endsWith(":")) return true;
+  return /\b(?:I'll|I will|I'm going to|let me(?! know)|delegating|dispatching|dispatched|spawning|launching)\b/i.test(trimmed);
+}
+
 export function renderToolResultBlocks(messages: ChatMessage[], context: ChatMessage[] = messages): string {
   const names = new Map<string, string>();
   for (const message of context) {
