@@ -89,6 +89,24 @@ describe("tool prompt protocol", () => {
     expect(parsed.calls.map((call) => call.name)).toEqual(["read_file", "write_file"]);
   });
 
+  it("parses a block whose fence was glued onto the sentence before it and came back escaped", () => {
+    // As converted from Muse's page: the block rendered as a paragraph, so backticks, brackets and
+    // backslashes are escaped and nothing closes the fence.
+    const markdown =
+      'Found four bugs in todo.js. Applying all fixes now.\\`\\`\\`json  \n{"endpoint": "/api/edit", "body": {"input": "\\[todo.js#0AF6\\]\\\\nPUT 3.=3:\\\\n+ add(title) { return \\\\"x\\\\"; }"}}';
+    const parsed = parseToolCalls(markdown);
+    expect(parsed.text).toBe("Found four bugs in todo.js. Applying all fixes now.");
+    expect(parsed.calls).toHaveLength(1);
+    expect(parsed.calls[0]!.name).toBe("edit");
+    expect(JSON.parse(parsed.calls[0]!.argumentsJson)).toEqual({ input: '[todo.js#0AF6]\nPUT 3.=3:\n+ add(title) { return "x"; }' });
+
+    const filter = createToolTextFilter();
+    expect(filter.append(markdown)).toBe("Found four bugs in todo.js. Applying all fixes now.");
+    expect(filter.finish()).toMatchObject({ unsentText: "", calls: [{ name: "edit" }] });
+
+    expect(parseToolCalls("Use \\`\\`\\` to open a fence.")).toEqual({ text: "Use \\`\\`\\` to open a fence.", calls: [] });
+  });
+
   it("supports tag fallback and four-backtick fences", () => {
     expect(parseToolCalls('<tool_call>{"name":"read_file","arguments":{}}</tool_call>').calls).toEqual([
       { name: "read_file", argumentsJson: "{}" },

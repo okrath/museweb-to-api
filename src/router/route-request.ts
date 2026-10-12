@@ -62,6 +62,10 @@ interface TurnOutcome {
   error?: Extract<TurnEvent, { type: "error" }>;
 }
 
+/** Sent instead of an answer Muse gave to a task without running any request, even after a nudge. */
+export const unverifiedAnswerNotice =
+  "Muse answered without sending any request to this app, so nothing was read, changed or run on your machine. Its answer describes work done elsewhere and was withheld. Ask again or rephrase the task.";
+
 function createToolCallId(): string {
   return `call_${randomBytes(18).toString("base64url")}`;
 }
@@ -107,6 +111,10 @@ async function runOnce(
     await runDriverTurn(turn, announced ? missingRequestNudge : noRequestYetNudge, outcome.conversationId, announced ? "loud" : "quiet");
   } else if (first.nudge) {
     // No thread to nudge in (or the client left): end the held-back turn as it was.
+    if (first.nudge === "unverified" && outcome.text.length > 0) {
+      streamed.text += outcome.text;
+      forward({ type: "text_delta", text: outcome.text });
+    }
     forward({ type: "done", stopReason: "end_turn" });
   }
   return { outcome, held };
@@ -136,8 +144,11 @@ async function runDriverTurn(
   const now = deps.now ?? Date.now;
   if (conversationId && deps.registry) deps.registry.begin(conversationId);
   const toolFilter = req.tools && req.tools.length > 0 ? createToolTextFilter() : undefined;
+  // A task that has not run anything yet may get a finished answer from Muse's own machine; that
+  // answer is held until the quiet nudge has shown whether it stands.
+  const held = kind === "quiet" || (kind === "first" && req.toolChoice !== "none" && taskWithoutAnyRequest(req.messages));
   const textBefore = outcome.text;
-  let separate = textBefore.length > 0;
+  let separate = kind !== "quiet" && textBefore.length > 0;
   let nudge: "announced" | "unverified" | undefined;
   const sendToolText = (text: string) => {
     if (text.length === 0) return;
@@ -161,7 +172,7 @@ async function runDriverTurn(
         if (event.type === "text_delta") {
           if (toolFilter) {
             const safe = toolFilter.append(event.text);
-            if (req.stream && kind !== "quiet") sendToolText(safe);
+            if (req.stream && !held) sendToolText(safe);
           } else {
             outcome.text += event.text;
             forward(event);
@@ -182,21 +193,28 @@ async function runDriverTurn(
           const parsed = toolFilter.finish();
           const calls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
           if (kind === "quiet" && calls.length === 0) {
-            // The nudge found nothing to request: the original answer stands as it was.
+            // "OK" means no request was needed and the held answer stands. Anything else means
+            // Muse still claims work that never ran on the client, so the client is told that.
+            const text = /^ok\W*$/i.test(parsed.text) ? textBefore : unverifiedAnswerNotice;
+            if (text !== textBefore) deps.log.warn({ requestId: req.requestId }, "Muse still sent no request after the nudge; answer withheld");
+            outcome.text = text;
+            sendToolText(text);
             forward({ type: "done", stopReason: "end_turn" });
             return;
-          }
-          outcome.text = [textBefore, parsed.text].filter((part) => part.length > 0).join("\n\n");
-          outcome.toolCalls = calls;
-          sendToolText(req.stream && kind !== "quiet" ? parsed.unsentText : parsed.text);
-          for (const call of calls) {
-            forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
           }
           if (kind === "first" && !outcome.error && calls.length === 0 && req.toolChoice !== "none") {
             if (announcesWithoutRequest(parsed.text)) nudge = "announced";
             else if (parsed.text.length > 0 && taskWithoutAnyRequest(req.messages)) nudge = "unverified";
-            if (nudge) return;
           }
+          // A quiet nudge that found requests replaces the held answer it was asked about.
+          outcome.text = [kind === "quiet" ? "" : textBefore, parsed.text].filter((part) => part.length > 0).join("\n\n");
+          outcome.toolCalls = calls;
+          if (nudge === "unverified") return;
+          sendToolText(req.stream && !held ? parsed.unsentText : parsed.text);
+          for (const call of calls) {
+            forward({ type: "tool_call", id: call.id, name: call.name, argumentsJson: call.argumentsJson });
+          }
+          if (nudge) return;
           forward({ type: "done", stopReason: calls.length > 0 ? "tool_use" : "end_turn" });
         } else {
           forward(event);

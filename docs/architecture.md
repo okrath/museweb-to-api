@@ -62,8 +62,10 @@ Fastify gateway (src/server.ts)
    another's result goes in a later reply). A reply with no call that only
    announces one (`announcesWithoutRequest`) gets one `missingRequestNudge` turn in the same
    thread; a finished answer to a task in a conversation that never ran a request
-   (`taskWithoutAnyRequest`) gets one buffered `noRequestYetNudge` turn whose reply is kept only
-   when it requests something. Then the router emits cleaned text, function-call events, and a
+   (`taskWithoutAnyRequest`) is held back and gets one buffered `noRequestYetNudge` turn: its
+   requests replace the held answer, "OK" releases it, and anything else replaces it with
+   `unverifiedAnswerNotice`. A block whose fence Muse glued onto the sentence before arrives as an
+   escaped paragraph; `prompt/inline-fence.ts` still finds it. Then the router emits cleaned text, function-call events, and a
    `tool_use` stop reason. A resumed turn, or a turn using a warm side chat, is held back until
    its first content delta; if it fails before that (for example the Muse
    chat no longer opens) the router deletes the dead session or warm entry and reruns the request

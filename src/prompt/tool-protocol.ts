@@ -1,4 +1,5 @@
 import type { ChatMessage, ToolChoice, ToolDefinition } from "../core/types.js";
+import { escapedFence, inlineFenceBlocks } from "./inline-fence.js";
 
 export interface ParsedToolCall {
   name: string;
@@ -279,6 +280,8 @@ export function parseToolCalls(markdown: string): ParsedToolMarkdown {
     previousEnd = candidate.end;
   }
 
+  if (selected.length === 0) return inlineFenceCalls(markdown) ?? { text: markdown.trim(), calls: [] };
+
   const text: string[] = [];
   const calls: ParsedToolCall[] = [];
   let cursor = 0;
@@ -292,9 +295,30 @@ export function parseToolCalls(markdown: string): ParsedToolMarkdown {
   return { text: text.join("").trim(), calls };
 }
 
+/** Calls from blocks whose fence was glued onto the sentence before (see `inline-fence.ts`). */
+function inlineFenceCalls(markdown: string): ParsedToolMarkdown | null {
+  const found = inlineFenceBlocks(markdown);
+  if (!found) return null;
+  const text = [found.prefix];
+  const calls: ParsedToolCall[] = [];
+  let cursor = 0;
+  for (const block of found.blocks) {
+    const call = parsedCall(block.body);
+    if (!call) continue;
+    text.push(found.rest.slice(cursor, block.start));
+    calls.push(call);
+    cursor = block.end;
+  }
+  if (calls.length === 0) return null;
+  text.push(found.rest.slice(cursor));
+  return { text: text.join("").trim(), calls };
+}
+
 function possibleBlockStart(markdown: string, from: number): number | null {
   const tag = "<tool_call>";
   let tagStart = markdown.indexOf(tag, from);
+  const inlineFence = markdown.indexOf(escapedFence, from);
+  if (inlineFence >= 0) tagStart = tagStart < 0 ? inlineFence : Math.min(tagStart, inlineFence);
   for (let length = tag.length - 1; length > 0; length--) {
     if (markdown.endsWith(tag.slice(0, length))) {
       const start = markdown.length - length;
@@ -323,7 +347,7 @@ function possibleBlockStart(markdown: string, from: number): number | null {
     if (newline === -1) break;
     lineStart = newline + 1;
   }
-  return tagStart;
+  return tagStart >= 0 ? tagStart : null;
 }
 
 export interface ToolTextFilter {

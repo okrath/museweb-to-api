@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseSse, startTestGateway, type TestGateway } from "../helpers/server.js";
+import { unverifiedAnswerNotice } from "../../src/router/route-request.js";
 
 let gateway: TestGateway;
 
@@ -294,7 +295,42 @@ describe("gateway", () => {
     const choice = response.json().choices[0];
     expect(choice.finish_reason).toBe("tool_calls");
     expect(choice.message.tool_calls[0].function.name).toBe("write_file");
+    expect(choice.message.content ?? "").not.toContain("ALL PASS");
     expect(gateway.driver.calls[1]?.prompt).toContain("No request has been sent to the app");
+  });
+
+  it("withholds a task answer that still sends no request after the nudge", async () => {
+    const definition = { type: "function", function: { name: "write_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["Done: wc.js is written ", "and the tests pass."] });
+    gateway.driver.enqueue({ chunks: ["sample.txt is not in my working directory."] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", stream: true, messages: [{ role: "user", content: "Write wc.js and run its test" }], tools: [definition] },
+    });
+    const chunks = parseSse(response.payload)
+      .filter((frame) => frame.data !== "[DONE]")
+      .map((frame) => JSON.parse(frame.data) as { choices: Array<{ delta: { content?: string }; finish_reason: string | null }> });
+    expect(chunks.map((chunk) => chunk.choices[0]!.delta.content ?? "").join("")).toBe(unverifiedAnswerNotice);
+    expect(chunks.at(-1)?.choices[0]?.finish_reason).toBe("stop");
+    expect(gateway.driver.calls).toHaveLength(2);
+  });
+
+  it("reads a request block whose fence Muse glued onto the sentence before", async () => {
+    const definition = { type: "function", function: { name: "edit", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ['Applying the fix now.\\`\\`\\`json  \n{"endpoint": "/api/edit", "body": {"path": "todo.js"}}'] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "Fix todo.js" }], tools: [definition] },
+    });
+    const choice = response.json().choices[0];
+    expect(choice.finish_reason).toBe("tool_calls");
+    expect(choice.message.content).toBe("Applying the fix now.");
+    expect(choice.message.tool_calls[0].function).toEqual({ name: "edit", arguments: '{"path":"todo.js"}' });
+    expect(gateway.driver.calls).toHaveLength(1);
   });
 
   it("keeps the original answer when the quiet nudge finds nothing to request", async () => {
