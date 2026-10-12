@@ -18,10 +18,11 @@ export interface InlineFenceBlocks {
 /**
  * Where the first fence glued onto preceding text starts, escaped or not, or -1. Whatever such a
  * block held may have lost characters on Muse's page (it drops the `\` of `\"`), so it can only
- * be read when its JSON still parses.
+ * be read when its JSON still parses. `blockOnly` counts only a fence followed by a JSON object,
+ * so prose that merely mentions a fence, or a closing fence stuck to `}`, is not a block.
  */
-export function gluedFenceStart(text: string, from = 0): number {
-  const glued = /\\`\\`\\`|[^\s`\\]```/g;
+export function gluedFenceStart(text: string, from = 0, blockOnly = false): number {
+  const glued = blockOnly ? /(?:\\`\\`\\`|[^\s`\\]```)[\w-]*\s*\{/g : /\\`\\`\\`|[^\s`\\]```/g;
   glued.lastIndex = Math.max(0, from);
   const match = glued.exec(text);
   if (!match) return -1;

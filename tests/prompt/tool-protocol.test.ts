@@ -116,6 +116,9 @@ describe("tool prompt protocol", () => {
     expect(gluedFenceStart("Fixing now.\n```json\n{}\n```")).toBe(-1);
     expect(gluedFenceStart("Use ```js fences.")).toBe(-1);
     expect(gluedFenceStart("````\n{}\n````")).toBe(-1);
+    expect(gluedFenceStart("Fixing now.\\`\\`\\`json  \n{\"endpoint\": 1}", 0, true)).toBe(11);
+    expect(gluedFenceStart("Use \\`\\`\\` to open a fence.", 0, true)).toBe(-1);
+    expect(gluedFenceStart('```json\n{"endpoint": "/api/x", "body": {}}```', 0, true)).toBe(-1);
   });
 
   it("supports tag fallback and four-backtick fences", () => {

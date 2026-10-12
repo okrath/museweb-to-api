@@ -364,6 +364,19 @@ describe("gateway", () => {
     expect(gateway.driver.calls).toHaveLength(2);
   });
 
+  it("keeps a plain answer that only mentions a fence", async () => {
+    const definition = { type: "function", function: { name: "read_file", parameters: { type: "object" } } };
+    gateway.driver.enqueue({ chunks: ["A fence opens with \\`\\`\\` followed by a language."] });
+    const response = await gateway.app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: auth(),
+      payload: { model: "muse", messages: [{ role: "user", content: "How does a fence look?" }], tools: [definition] },
+    });
+    expect(response.json().choices[0].message.content).toBe("A fence opens with \\`\\`\\` followed by a language.");
+    expect(gateway.driver.calls).toHaveLength(1);
+  });
+
   it("reads a request block whose fence Muse glued onto the sentence before", async () => {
     const definition = { type: "function", function: { name: "edit", parameters: { type: "object" } } };
     gateway.driver.enqueue({ chunks: ['Applying the fix now.\\`\\`\\`json  \n{"endpoint": "/api/edit", "body": {"path": "todo.js"}}'] });

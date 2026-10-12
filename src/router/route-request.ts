@@ -215,7 +215,7 @@ async function runDriverTurn(
         } else if (toolFilter) {
           const parsed = toolFilter.finish();
           const calls = parsed.calls.map((call) => ({ id: createToolCallId(), ...call }));
-          const glued = req.toolChoice === "none" ? -1 : gluedFenceStart(parsed.text);
+          const glued = req.toolChoice === "none" ? -1 : gluedFenceStart(parsed.text, 0, true);
           if (glued >= 0) {
             // A block glued onto text may have lost characters on the page, so none of this
             // reply's requests are sent: running only the readable ones would leave a step half done.
