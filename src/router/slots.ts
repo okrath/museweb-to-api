@@ -35,9 +35,8 @@ export class TurnSlots {
       signal?.addEventListener("abort", onAbort, { once: true });
       this.waiters.push(waiter);
     });
-    if (!granted) return null;
-    this.active++;
-    return this.releaser();
+    // The releaser handed its slot over without decrementing `active`.
+    return granted ? this.releaser() : null;
   }
 
   private releaser(): () => void {
@@ -45,9 +44,12 @@ export class TurnSlots {
     return () => {
       if (released) return;
       released = true;
-      this.active--;
+      // Hand the slot straight to the next waiter. Decrementing first left `active` below `max`
+      // until the waiter resumed a microtask later, and a synchronous caller (the reaper's loop)
+      // took the slot in between: three turns on two tabs, "no free browser tab" (2026-10-12).
       const next = this.waiters.shift();
       if (next) next(true);
+      else this.active--;
     };
   }
 }
